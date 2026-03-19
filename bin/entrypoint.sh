@@ -9,7 +9,7 @@ set -eo pipefail
 # ----- Colors for output -----
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[hybrid-node]${NC} $*"; }
-warn() { echo -e "${YELLOW}[hybrid-node]${NC} WARN: $*"; }
+warn() { echo -e "${YELLOW}[hybrid-node]${NC} WARN: $*" >&2; }
 err()  { echo -e "${RED}[hybrid-node]${NC} ERROR: $*" >&2; }
 
 # ----- Defaults -----
@@ -520,19 +520,19 @@ build_node_cmd() {
             CMD="${CMD} --shelley-kes-key ${priv_pool}/hot.skey"
             CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
             CMD="${CMD} --shelley-operational-certificate ${priv_pool}/op.cert"
-            log "BP mode: KES keys loaded from ${priv_pool} (Guild naming)"
+            log "BP mode: KES keys loaded from ${priv_pool} (Guild naming)" >&2
         # Try CoinCashew naming: kes.skey, vrf.skey, node.cert
         elif [ -f "${priv_pool}/kes.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/node.cert" ]; then
             CMD="${CMD} --shelley-kes-key ${priv_pool}/kes.skey"
             CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
             CMD="${CMD} --shelley-operational-certificate ${priv_pool}/node.cert"
-            log "BP mode: KES keys loaded from ${priv_pool} (CoinCashew naming)"
+            log "BP mode: KES keys loaded from ${priv_pool} (CoinCashew naming)" >&2
         # Try alt naming: hot.skey, vrf.skey, opcert.cert
         elif [ -f "${priv_pool}/hot.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/opcert.cert" ]; then
             CMD="${CMD} --shelley-kes-key ${priv_pool}/hot.skey"
             CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
             CMD="${CMD} --shelley-operational-certificate ${priv_pool}/opcert.cert"
-            log "BP mode: KES keys loaded from ${priv_pool} (alt naming)"
+            log "BP mode: KES keys loaded from ${priv_pool} (alt naming)" >&2
         else
             warn "BP mode but no KES keys found in ${priv_pool}/"
             warn "Expected one of:"
@@ -540,7 +540,7 @@ build_node_cmd() {
             warn "  CoinCashew: kes.skey, vrf.skey, node.cert"
             warn "  Alt:        hot.skey, vrf.skey, opcert.cert"
             warn "Starting as relay-equivalent (no block production)"
-            ls -la "${priv_pool}/" 2>/dev/null || warn "Directory does not exist: ${priv_pool}"
+            ls -la "${priv_pool}/" >&2 2>&1 || warn "Directory does not exist: ${priv_pool}"
         fi
     fi
 
