@@ -6,7 +6,6 @@
 
 # ----- Build Arguments -----
 ARG NODE_VERSION=10.6.2
-ARG CLI_VERSION=10.14.0.0
 ARG GHC_VERSION=9.6.6
 ARG CABAL_VERSION=3.12.1.0
 ARG HASKELL_IMAGE_TAG=9.6.6-3.12.1.0-3
@@ -17,28 +16,23 @@ ARG HASKELL_IMAGE_TAG=9.6.6-3.12.1.0-3
 FROM ghcr.io/blinklabs-io/haskell:${HASKELL_IMAGE_TAG} AS build
 
 ARG NODE_VERSION
-ARG CLI_VERSION
 
-# Build cardano-node
 RUN echo "Building cardano-node ${NODE_VERSION}..." && \
     git clone --depth 1 --branch ${NODE_VERSION} \
       https://github.com/IntersectMBO/cardano-node.git /build/cardano-node && \
     cd /build/cardano-node && \
-    echo "package cardano-crypto-praos"   >  cabal.project.local && \
+    echo "package cardano-crypto-praos"     >  cabal.project.local && \
     echo "  flags: -external-libsodium-vrf" >> cabal.project.local && \
     cabal update && \
     cabal build cardano-node cardano-cli && \
-    # Copy built binaries to staging area
     mkdir -p /build/bin && \
     cp $(cabal list-bin cardano-node) /build/bin/ && \
     cp $(cabal list-bin cardano-cli)  /build/bin/ && \
-    # Strip debug symbols
     strip /build/bin/cardano-node && \
-    strip /build/bin/cardano-cli && \
-    echo "Build complete: cardano-node $(./build/bin/cardano-node --version | head -1)"
+    strip /build/bin/cardano-cli
 
 # ============================================================================
-# Stage 2: Download pre-built companion tools (Blink Labs releases)
+# Stage 2: Download pre-built companion tools
 # ============================================================================
 FROM debian:bookworm-slim AS tools
 
@@ -48,52 +42,48 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Map Docker arch to tool arch
-RUN case "${TARGETARCH}" in \
-      amd64) echo "x86_64" > /tmp/arch ;; \
-      arm64) echo "aarch64" > /tmp/arch ;; \
-      *)     echo "unsupported" > /tmp/arch ;; \
-    esac
-
-# Download mithril-client
+# --- Mithril (IOG .deb packages from stable release) ---
+ARG MITHRIL_RELEASE=2603.1
 ARG MITHRIL_CLIENT_VERSION=0.12.38
-RUN ARCH=$(cat /tmp/arch) && \
-    curl -sL "https://github.com/input-output-hk/mithril/releases/download/${MITHRIL_CLIENT_VERSION}/mithril-client-${MITHRIL_CLIENT_VERSION}-linux-${ARCH}.tar.gz" \
-    | tar xz -C /usr/local/bin/ || \
-    echo "WARN: mithril-client download failed, will try alternative" && \
-    chmod +x /usr/local/bin/mithril-client 2>/dev/null || true
-
-# Download mithril-signer
 ARG MITHRIL_SIGNER_VERSION=0.3.7
-RUN ARCH=$(cat /tmp/arch) && \
-    curl -sL "https://github.com/input-output-hk/mithril/releases/download/${MITHRIL_SIGNER_VERSION}/mithril-signer-${MITHRIL_SIGNER_VERSION}-linux-${ARCH}.tar.gz" \
-    | tar xz -C /usr/local/bin/ || \
-    echo "WARN: mithril-signer download failed" && \
-    chmod +x /usr/local/bin/mithril-signer 2>/dev/null || true
+ARG MITHRIL_BUILD_HASH=567a8e8
 
-# Download nview
+RUN ARCH="${TARGETARCH}" && \
+    echo "Installing mithril-client ${MITHRIL_CLIENT_VERSION} (${ARCH})..." && \
+    curl -sL -o /tmp/mithril-client.deb \
+      "https://github.com/input-output-hk/mithril/releases/download/${MITHRIL_RELEASE}/mithril-client-cli_${MITHRIL_CLIENT_VERSION}%2B${MITHRIL_BUILD_HASH}-1_${ARCH}.deb" && \
+    dpkg -i /tmp/mithril-client.deb && \
+    rm -f /tmp/mithril-client.deb && \
+    echo "Installing mithril-signer ${MITHRIL_SIGNER_VERSION} (${ARCH})..." && \
+    curl -sL -o /tmp/mithril-signer.deb \
+      "https://github.com/input-output-hk/mithril/releases/download/${MITHRIL_RELEASE}/mithril-signer_${MITHRIL_SIGNER_VERSION}%2B${MITHRIL_BUILD_HASH}-1_${ARCH}.deb" && \
+    dpkg -i /tmp/mithril-signer.deb && \
+    rm -f /tmp/mithril-signer.deb
+
+# --- nview (Blink Labs — raw binary) ---
 ARG NVIEW_VERSION=0.13.0
-RUN ARCH=$(cat /tmp/arch) && \
-    curl -sL "https://github.com/blinklabs-io/nview/releases/download/v${NVIEW_VERSION}/nview_${NVIEW_VERSION}_linux_${ARCH}.tar.gz" \
-    | tar xz -C /usr/local/bin/ nview && \
+RUN ARCH="${TARGETARCH}" && \
+    curl -sL -o /usr/local/bin/nview \
+      "https://github.com/blinklabs-io/nview/releases/download/v${NVIEW_VERSION}/nview-v${NVIEW_VERSION}-linux-${ARCH}" && \
     chmod +x /usr/local/bin/nview
 
-# Download txtop
+# --- txtop (Blink Labs — raw binary) ---
 ARG TXTOP_VERSION=0.14.0
-RUN ARCH=$(cat /tmp/arch) && \
-    curl -sL "https://github.com/blinklabs-io/txtop/releases/download/v${TXTOP_VERSION}/txtop_${TXTOP_VERSION}_linux_${ARCH}.tar.gz" \
-    | tar xz -C /usr/local/bin/ txtop && \
+RUN ARCH="${TARGETARCH}" && \
+    curl -sL -o /usr/local/bin/txtop \
+      "https://github.com/blinklabs-io/txtop/releases/download/v${TXTOP_VERSION}/txtop-v${TXTOP_VERSION}-linux-${ARCH}" && \
     chmod +x /usr/local/bin/txtop
 
-# Download cncli
-ARG CNCLI_VERSION=6.4.1
-RUN ARCH=$(cat /tmp/arch) && \
-    if [ "${ARCH}" = "x86_64" ]; then \
-      curl -sL "https://github.com/cardano-community/cncli/releases/download/v${CNCLI_VERSION}/cncli-${CNCLI_VERSION}-${ARCH}-unknown-linux-gnu.tar.gz" \
+# --- cncli (cardano-community — tarball, amd64 only) ---
+ARG CNCLI_VERSION=6.7.0
+RUN ARCH="${TARGETARCH}" && \
+    if [ "${ARCH}" = "amd64" ]; then \
+      curl -sL "https://github.com/cardano-community/cncli/releases/download/v${CNCLI_VERSION}/cncli-${CNCLI_VERSION}-ubuntu22-x86_64-unknown-linux-gnu.tar.gz" \
       | tar xz -C /usr/local/bin/ && \
       chmod +x /usr/local/bin/cncli; \
     else \
       echo "cncli not available for ${ARCH}, skipping"; \
+      touch /usr/local/bin/cncli; \
     fi
 
 # ============================================================================
@@ -107,6 +97,10 @@ LABEL org.opencontainers.image.description="Hybrid Cardano node: Blink Labs sour
 LABEL org.opencontainers.image.source="https://github.com/volcyada/Hybrid-Node"
 LABEL org.opencontainers.image.licenses="MIT"
 
+ENV CNODE_HOME=/opt/cardano/cnode
+# SUDO=N tells guild-deploy.sh to skip sudo wrapper (required for Docker builds)
+ENV SUDO=N
+
 # Runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash bc curl wget jq procps net-tools iproute2 \
@@ -116,10 +110,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
-# Create guild user and directory structure (Guild Operators convention)
-RUN useradd -m -d /home/guild -s /bin/bash guild && \
-    mkdir -p /opt/cardano/cnode/{db,logs,priv,scripts,files,guild-db} && \
-    mkdir -p /opt/cardano/cnode/priv/pool && \
+# Create guild user (UID 1000 for K3s fsGroup compatibility)
+RUN useradd -m -d /home/guild -s /bin/bash -u 1000 guild && \
+    mkdir -p ${CNODE_HOME}/{db,logs,priv,scripts,files,guild-db,sockets} && \
+    mkdir -p ${CNODE_HOME}/priv/pool && \
+    mkdir -p /root/.local/bin && \
     chown -R guild:guild /opt/cardano
 
 # Copy source-built binaries from Stage 1
@@ -127,69 +122,83 @@ COPY --from=build /build/bin/cardano-node /usr/local/bin/
 COPY --from=build /build/bin/cardano-cli  /usr/local/bin/
 
 # Copy companion tools from Stage 2
-COPY --from=tools /usr/local/bin/mithril-client  /usr/local/bin/
-COPY --from=tools /usr/local/bin/mithril-signer  /usr/local/bin/
-COPY --from=tools /usr/local/bin/nview            /usr/local/bin/
-COPY --from=tools /usr/local/bin/txtop            /usr/local/bin/
-COPY --from=tools /usr/local/bin/cncli            /usr/local/bin/
+# Note: mithril debs install to /usr/bin, others to /usr/local/bin
+COPY --from=tools /usr/bin/mithril-client  /usr/local/bin/
+COPY --from=tools /usr/bin/mithril-signer  /usr/local/bin/
+COPY --from=tools /usr/local/bin/nview     /usr/local/bin/
+COPY --from=tools /usr/local/bin/txtop     /usr/local/bin/
+COPY --from=tools /usr/local/bin/cncli     /usr/local/bin/
 
-# Install Guild Operators scripts (CNTools, gLiveView, etc.)
-USER guild
-WORKDIR /opt/cardano/cnode
+# ---- Install Guild Operators scripts (run as root with SUDO=N) ----
+# Pass 1: Download helper scripts and platform configs
+ARG G_ACCOUNT=cardano-community
+ARG GUILD_DEPLOY_BRANCH=master
 
-# Deploy Guild scripts — use guild-deploy.sh from Guild Operators
-# -s d = Download scripts only (no node binary)
-# -n = Non-interactive
-# -p /opt/cardano/cnode = Install path
-RUN curl -sS -o /tmp/guild-deploy.sh \
-      https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/guild-deploy.sh && \
+RUN apt-get update && \
+    curl -sS -o /tmp/guild-deploy.sh \
+      https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
     chmod +x /tmp/guild-deploy.sh && \
-    SKIP_UPDATE=Y CNODE_HOME=/opt/cardano/cnode \
-    bash /tmp/guild-deploy.sh -b master -n -s dlp && \
-    rm -f /tmp/guild-deploy.sh
+    SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y CNODE_HOME=${CNODE_HOME} \
+    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -s p && \
+    apt-get -y purge && apt-get -y clean && apt-get -y autoremove && \
+    rm -rf /var/lib/apt/lists/*
 
-# Download mithril-related guild scripts
+# Pass 2: Download scripts, configs, mithril helpers, wallet, other tools
+RUN SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y CNODE_HOME=${CNODE_HOME} \
+    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -s dcmowx && \
+    rm -f /tmp/guild-deploy.sh && \
+    chown -R guild:guild ${CNODE_HOME} && \
+    mv /root/.local/bin /home/guild/.local/ 2>/dev/null || true && \
+    chown -R guild:guild /home/guild/
+
+# Download configs for all supported networks
+RUN bash -c 'networks=(guild mainnet preprod preview); \
+    files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json); \
+    for network in "${networks[@]}"; do \
+        mkdir -pv ${CNODE_HOME}/files/${network} && \
+        for file in "${files[@]}"; do \
+            curl -s -o ${CNODE_HOME}/files/${network}/${file} \
+              https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
+        done; \
+    done' && chown -R guild:guild /opt/cardano
+
+# Download additional mithril guild scripts
 RUN for script in mithril-client.sh mithril-signer.sh mithril-relay.sh; do \
-      curl -sS -o /opt/cardano/cnode/scripts/${script} \
-        "https://raw.githubusercontent.com/cardano-community/guild-operators/master/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
-      chmod +x /opt/cardano/cnode/scripts/${script} 2>/dev/null || true; \
-    done
+      curl -sS -o ${CNODE_HOME}/scripts/${script} \
+        "https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
+      chmod +x ${CNODE_HOME}/scripts/${script} 2>/dev/null || true; \
+    done && chown -R guild:guild ${CNODE_HOME}/scripts/
 
-# Switch back to root for entrypoint setup
-USER root
-
-# Copy entrypoint and configs
+# Copy entrypoint and config overrides
 COPY bin/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Copy network config override files
-COPY configs/ /opt/cardano/cnode/hybrid-configs/
-RUN chown -R guild:guild /opt/cardano/cnode/hybrid-configs/
+COPY configs/ ${CNODE_HOME}/hybrid-configs/
+RUN chown -R guild:guild ${CNODE_HOME}/hybrid-configs/
 
 # Environment defaults
 ENV NETWORK=mainnet \
     NODE_MODE=relay \
     NODE_PORT=6000 \
-    CNODE_HOME=/opt/cardano/cnode \
-    CARDANO_NODE_SOCKET_PATH=/opt/cardano/cnode/db/node.socket \
+    CARDANO_NODE_SOCKET_PATH=${CNODE_HOME}/db/node.socket \
     UPDATE_CHECK=N \
     MITHRIL_DOWNLOAD=N \
     MITHRIL_SIGNER=N \
     RTS_OPTS="-N2 -I0 -A16m -qg -qb --disable-delayed-os-memory-return" \
-    PATH="/opt/cardano/cnode/scripts:/usr/local/bin:${PATH}"
+    PATH="${CNODE_HOME}/scripts:/usr/local/bin:${PATH}"
 
-# Expose default node port and Prometheus metrics
+# Expose node port and Prometheus metrics
 EXPOSE 6000 12798
 
 # Volumes for persistent data
-VOLUME ["/opt/cardano/cnode/db", "/opt/cardano/cnode/priv", "/opt/cardano/cnode/logs"]
+VOLUME ["${CNODE_HOME}/db", "${CNODE_HOME}/priv", "${CNODE_HOME}/logs"]
 
-# Healthcheck using cardano-cli
+# Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
-    CMD cardano-cli query tip --socket-path ${CARDANO_NODE_SOCKET_PATH} 2>/dev/null | jq -e '.syncProgress == "100.00"' > /dev/null 2>&1 || \
-        (cardano-cli query tip --socket-path ${CARDANO_NODE_SOCKET_PATH} 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1 && exit 0) || exit 1
+    CMD cardano-cli query tip --socket-path ${CARDANO_NODE_SOCKET_PATH} 2>/dev/null \
+        | jq -e '.syncProgress' > /dev/null 2>&1 || exit 1
 
 USER guild
-WORKDIR /opt/cardano/cnode
+WORKDIR ${CNODE_HOME}
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
