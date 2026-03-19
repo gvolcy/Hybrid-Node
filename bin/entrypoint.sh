@@ -18,6 +18,22 @@ err()  { echo -e "${RED}[hybrid-node]${NC} ERROR: $*" >&2; }
 : "${NODE_PORT:=6000}"
 : "${CNODE_HOME:=/opt/cardano/cnode}"
 : "${CNODE_PORT:=${NODE_PORT}}"
+
+# Auto-detect BP mode from CARDANO_BLOCK_PRODUCER or CNCLI_ENABLED
+if [ "${CARDANO_BLOCK_PRODUCER}" = "true" ] && [ "${NODE_MODE}" = "relay" ]; then
+    NODE_MODE="bp"
+fi
+
+# Sync NODE_PORT from CNODE_PORT if CNODE_PORT was explicitly set (K8s env)
+if [ "${CNODE_PORT}" != "${NODE_PORT}" ]; then
+    NODE_PORT="${CNODE_PORT}"
+fi
+
+# Compatibility: accept MITHRIL_SIGNER_ENABLED as alias for MITHRIL_SIGNER
+if [ "${MITHRIL_SIGNER_ENABLED:-}" = "Y" ] && [ -z "${MITHRIL_SIGNER:-}" ]; then
+    MITHRIL_SIGNER="Y"
+fi
+
 : "${MITHRIL_DOWNLOAD:=N}"
 : "${MITHRIL_SIGNER:=N}"
 : "${UPDATE_CHECK:=N}"
