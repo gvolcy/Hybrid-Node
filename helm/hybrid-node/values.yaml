@@ -1,0 +1,119 @@
+# Default values for hybrid-node
+replicaCount: 1
+
+image:
+  repository: ghcr.io/volcyada/hybrid-node
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Cardano node configuration
+cardano:
+  # Network: mainnet, preview, preprod, guild
+  network: mainnet
+  # Mode: relay or bp
+  mode: relay
+  # Node port
+  port: 6000
+  # GHC RTS options
+  rtsOpts: "-N2 -I0 -A16m -qg -qb --disable-delayed-os-memory-return"
+  # Enable mithril download on first start
+  mithrilDownload: "N"
+  # Enable mithril signer (BP mode only)
+  mithrilSigner: "N"
+  # Custom peers (comma-separated addr:port)
+  customPeers: ""
+
+# For BP mode: mount KES keys from a K8s secret
+kesSecret:
+  # Set to true and provide secretName to mount KES keys
+  enabled: false
+  secretName: ""
+  # Keys in the secret should be: kes.skey, vrf.skey, node.cert
+
+# Additional environment variables
+extraEnv: []
+  # - name: CUSTOM_VAR
+  #   value: "custom-value"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 6000
+  # For relay nodes, you may want NodePort or LoadBalancer
+  # type: NodePort
+  # nodePort: 30001
+  annotations: {}
+
+# Prometheus metrics
+metrics:
+  enabled: true
+  port: 12798
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+
+persistence:
+  # Database storage
+  db:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 100Gi
+    # Use existing PVC
+    existingClaim: ""
+  # Logs storage (optional)
+  logs:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
+    existingClaim: ""
+
+# Use hostPath instead of PVC (for K3s single-node setups)
+hostPath:
+  enabled: false
+  dbPath: ""
+  # Example: /data/cardano/relay1/db
+
+resources:
+  requests:
+    memory: "8Gi"
+    cpu: "2"
+  limits:
+    memory: "24Gi"
+    cpu: "4"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Topology config override (raw JSON)
+topologyOverride: ""
+
+# Config override (raw JSON)
+configOverride: ""

@@ -1,0 +1,101 @@
+# Hybrid-Node Relay Deployment for K3s
+# Usage: kubectl apply -f relay.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cardano
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cardano-relay
+  namespace: cardano
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cardano-relay
+  namespace: cardano
+  labels:
+    app: cardano-relay
+    component: relay
+spec:
+  serviceName: cardano-relay
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cardano-relay
+  template:
+    metadata:
+      labels:
+        app: cardano-relay
+        component: relay
+    spec:
+      serviceAccountName: cardano-relay
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: cardano-node
+          image: ghcr.io/volcyada/hybrid-node:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "mainnet"
+            - name: NODE_MODE
+              value: "relay"
+            - name: NODE_PORT
+              value: "3001"
+          ports:
+            - containerPort: 3001
+              name: node
+              protocol: TCP
+            - containerPort: 12798
+              name: metrics
+              protocol: TCP
+          resources:
+            requests:
+              memory: "8Gi"
+              cpu: "2"
+            limits:
+              memory: "24Gi"
+              cpu: "4"
+          volumeMounts:
+            - name: db
+              mountPath: /opt/cardano/cnode/db
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"]
+            initialDelaySeconds: 300
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: db
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cardano-relay
+  namespace: cardano
+spec:
+  type: NodePort
+  ports:
+    - port: 3001
+      targetPort: 3001
+      nodePort: 30001
+      name: node
+    - port: 12798
+      targetPort: 12798
+      name: metrics
+  selector:
+    app: cardano-relay

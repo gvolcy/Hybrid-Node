@@ -1,0 +1,112 @@
+# Hybrid-Node Block Producer Deployment for K3s
+# Usage:
+#   1. Create KES secret: kubectl create secret generic bp-kes-keys -n cardano \
+#        --from-file=kes.skey --from-file=vrf.skey --from-file=node.cert
+#   2. kubectl apply -f bp.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cardano
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cardano-bp
+  namespace: cardano
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cardano-bp
+  namespace: cardano
+  labels:
+    app: cardano-bp
+    component: bp
+spec:
+  serviceName: cardano-bp
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cardano-bp
+  template:
+    metadata:
+      labels:
+        app: cardano-bp
+        component: bp
+    spec:
+      serviceAccountName: cardano-bp
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: cardano-node
+          image: ghcr.io/volcyada/hybrid-node:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "mainnet"
+            - name: NODE_MODE
+              value: "bp"
+            - name: NODE_PORT
+              value: "6000"
+            - name: MITHRIL_SIGNER
+              value: "N"
+          ports:
+            - containerPort: 6000
+              name: node
+              protocol: TCP
+            - containerPort: 12798
+              name: metrics
+              protocol: TCP
+          resources:
+            requests:
+              memory: "8Gi"
+              cpu: "2"
+            limits:
+              memory: "24Gi"
+              cpu: "4"
+          volumeMounts:
+            - name: db
+              mountPath: /opt/cardano/cnode/db
+            - name: kes-keys
+              mountPath: /opt/cardano/cnode/priv/pool
+              readOnly: true
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"]
+            initialDelaySeconds: 300
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: kes-keys
+          secret:
+            secretName: bp-kes-keys
+  volumeClaimTemplates:
+    - metadata:
+        name: db
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cardano-bp
+  namespace: cardano
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6000
+      targetPort: 6000
+      name: node
+    - port: 12798
+      targetPort: 12798
+      name: metrics
+  selector:
+    app: cardano-bp

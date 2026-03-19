@@ -1,0 +1,22 @@
+# Build artifacts
+*.tar.gz
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker build cache
+.docker/
+
+# Secrets (never commit)
+*.skey
+*.vkey
+*.cert

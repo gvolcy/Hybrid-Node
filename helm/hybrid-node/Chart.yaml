@@ -1,0 +1,18 @@
+apiVersion: v2
+name: hybrid-node
+description: Hybrid Cardano Node - Guild Operators + Blink Labs for K3s
+type: application
+version: 0.1.0
+appVersion: "10.6.2"
+keywords:
+  - cardano
+  - blockchain
+  - stakepool
+  - k3s
+  - kubernetes
+home: https://github.com/volcyada/Hybrid-Node
+sources:
+  - https://github.com/volcyada/Hybrid-Node
+maintainers:
+  - name: volcyada
+    url: https://github.com/volcyada

@@ -1,0 +1,3 @@
+# Place custom mainnet config overrides here
+# Files: config.json, topology.json
+# These will be used instead of downloading from IOG

@@ -1,0 +1,168 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "hybrid-node.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "hybrid-node.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "hybrid-node.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "hybrid-node.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: NETWORK
+              value: {{ .Values.cardano.network | quote }}
+            - name: NODE_MODE
+              value: {{ .Values.cardano.mode | quote }}
+            - name: NODE_PORT
+              value: {{ .Values.cardano.port | quote }}
+            - name: RTS_OPTS
+              value: {{ .Values.cardano.rtsOpts | quote }}
+            - name: MITHRIL_DOWNLOAD
+              value: {{ .Values.cardano.mithrilDownload | quote }}
+            - name: MITHRIL_SIGNER
+              value: {{ .Values.cardano.mithrilSigner | quote }}
+            {{- if .Values.cardano.customPeers }}
+            - name: CUSTOM_PEERS
+              value: {{ .Values.cardano.customPeers | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: node
+              containerPort: {{ .Values.cardano.port }}
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"
+            initialDelaySeconds: 300
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: db
+              mountPath: /opt/cardano/cnode/db
+            {{- if .Values.persistence.logs.enabled }}
+            - name: logs
+              mountPath: /opt/cardano/cnode/logs
+            {{- end }}
+            {{- if .Values.kesSecret.enabled }}
+            - name: kes-keys
+              mountPath: /opt/cardano/cnode/priv/pool
+              readOnly: true
+            {{- end }}
+            {{- if .Values.topologyOverride }}
+            - name: topology
+              mountPath: /opt/cardano/cnode/files/topology.json
+              subPath: topology.json
+            {{- end }}
+            {{- if .Values.configOverride }}
+            - name: config
+              mountPath: /opt/cardano/cnode/files/config.json
+              subPath: config.json
+            {{- end }}
+      volumes:
+        {{- if .Values.kesSecret.enabled }}
+        - name: kes-keys
+          secret:
+            secretName: {{ .Values.kesSecret.secretName }}
+        {{- end }}
+        {{- if .Values.topologyOverride }}
+        - name: topology
+          configMap:
+            name: {{ include "hybrid-node.fullname" . }}-topology
+        {{- end }}
+        {{- if .Values.configOverride }}
+        - name: config
+          configMap:
+            name: {{ include "hybrid-node.fullname" . }}-config
+        {{- end }}
+        {{- if .Values.hostPath.enabled }}
+        - name: db
+          hostPath:
+            path: {{ .Values.hostPath.dbPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if and .Values.persistence.db.enabled (not .Values.hostPath.enabled) }}
+  volumeClaimTemplates:
+    - metadata:
+        name: db
+      spec:
+        accessModes:
+          - {{ .Values.persistence.db.accessMode }}
+        {{- if .Values.persistence.db.storageClass }}
+        storageClassName: {{ .Values.persistence.db.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.db.size }}
+    {{- if .Values.persistence.logs.enabled }}
+    - metadata:
+        name: logs
+      spec:
+        accessModes:
+          - {{ .Values.persistence.logs.accessMode }}
+        {{- if .Values.persistence.logs.storageClass }}
+        storageClassName: {{ .Values.persistence.logs.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.logs.size }}
+    {{- end }}
+  {{- end }}

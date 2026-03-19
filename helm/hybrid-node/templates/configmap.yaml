@@ -1,0 +1,23 @@
+{{- if .Values.topologyOverride }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}-topology
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+data:
+  topology.json: |
+    {{- .Values.topologyOverride | nindent 4 }}
+{{- end }}
+---
+{{- if .Values.configOverride }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}-config
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {{- .Values.configOverride | nindent 4 }}
+{{- end }}
