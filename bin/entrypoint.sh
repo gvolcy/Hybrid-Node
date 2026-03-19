@@ -46,6 +46,10 @@ fi
 : "${EKG_HOST:=0.0.0.0}"
 : "${PROMETHEUS_HOST:=0.0.0.0}"
 : "${PROMETHEUS_PORT:=12798}"
+: "${IP_VERSION:=4}"
+: "${CNODE_LISTEN_IP4:=0.0.0.0}"
+: "${CNODE_LISTEN_IP6:=::}"
+: "${MEMPOOL_OVERRIDE:=}"
 
 # Pool configuration (BP mode)
 : "${POOL_NAME:=}"
@@ -145,6 +149,114 @@ install_runtime_deps() {
                 chmod 0440 /etc/sudoers.d/cntools 2>/dev/null || true
             fi
         fi
+    fi
+}
+
+# ----- Pre-startup sanity checks (from Guild Operators cnode.sh) -----
+pre_startup_sanity() {
+    # Clean up stale socket from previous crash/restart
+    if [ -S "${CARDANO_NODE_SOCKET_PATH}" ]; then
+        if pgrep -f "cardano-node.*${CARDANO_NODE_SOCKET_PATH}" > /dev/null 2>&1; then
+            err "A cardano-node is already running with this socket path!"
+            err "Socket: ${CARDANO_NODE_SOCKET_PATH}"
+            exit 1
+        else
+            log "Cleaning up stale socket from previous run..."
+            rm -f "${CARDANO_NODE_SOCKET_PATH}"
+        fi
+    fi
+
+    # Verify genesis hash sanity — recompute actual hashes and fix config.json
+    # This prevents NetworkMagicMismatch and crypto hash mismatches
+    check_genesis_hashes
+}
+
+# ----- Verify and fix genesis hashes in config.json (inspired by cnode.sh) -----
+check_genesis_hashes() {
+    local config_file="${CONFIG_DIR}/config.json"
+    if [ ! -f "${config_file}" ]; then
+        return  # config not yet downloaded, will be checked later
+    fi
+
+    if ! command -v cardano-cli &>/dev/null; then
+        warn "cardano-cli not found, skipping genesis hash verification"
+        return
+    fi
+
+    log "Verifying genesis hash integrity..."
+
+    local needs_fix=false
+    local byron_genesis="${CONFIG_DIR}/byron-genesis.json"
+    local shelley_genesis="${CONFIG_DIR}/shelley-genesis.json"
+    local alonzo_genesis="${CONFIG_DIR}/alonzo-genesis.json"
+    local conway_genesis="${CONFIG_DIR}/conway-genesis.json"
+
+    # Compute actual hashes from genesis files
+    local byron_hash="" shelley_hash="" alonzo_hash="" conway_hash=""
+
+    if [ -f "${byron_genesis}" ]; then
+        byron_hash=$(cardano-cli byron genesis print-genesis-hash --genesis-json "${byron_genesis}" 2>/dev/null || true)
+        local byron_cfg=$(jq -r '.ByronGenesisHash // empty' "${config_file}" 2>/dev/null)
+        if [ -n "${byron_hash}" ] && [ "${byron_hash}" != "${byron_cfg}" ]; then
+            warn "Byron genesis hash mismatch: config=${byron_cfg:0:16}... actual=${byron_hash:0:16}..."
+            needs_fix=true
+        fi
+    fi
+
+    if [ -f "${shelley_genesis}" ]; then
+        shelley_hash=$(cardano-cli hash genesis-file --genesis "${shelley_genesis}" 2>/dev/null || true)
+        local shelley_cfg=$(jq -r '.ShelleyGenesisHash // empty' "${config_file}" 2>/dev/null)
+        if [ -n "${shelley_hash}" ] && [ "${shelley_hash}" != "${shelley_cfg}" ]; then
+            warn "Shelley genesis hash mismatch: config=${shelley_cfg:0:16}... actual=${shelley_hash:0:16}..."
+            needs_fix=true
+        fi
+    fi
+
+    if [ -f "${alonzo_genesis}" ]; then
+        alonzo_hash=$(cardano-cli hash genesis-file --genesis "${alonzo_genesis}" 2>/dev/null || true)
+        local alonzo_cfg=$(jq -r '.AlonzoGenesisHash // empty' "${config_file}" 2>/dev/null)
+        if [ -n "${alonzo_hash}" ] && [ "${alonzo_hash}" != "${alonzo_cfg}" ]; then
+            warn "Alonzo genesis hash mismatch: config=${alonzo_cfg:0:16}... actual=${alonzo_hash:0:16}..."
+            needs_fix=true
+        fi
+    fi
+
+    if [ -f "${conway_genesis}" ]; then
+        conway_hash=$(cardano-cli hash genesis-file --genesis "${conway_genesis}" 2>/dev/null || true)
+        local conway_cfg=$(jq -r '.ConwayGenesisHash // empty' "${config_file}" 2>/dev/null)
+        if [ -n "${conway_hash}" ] && [ "${conway_hash}" != "${conway_cfg}" ]; then
+            warn "Conway genesis hash mismatch: config=${conway_cfg:0:16}... actual=${conway_hash:0:16}..."
+            needs_fix=true
+        fi
+    fi
+
+    if [ "${needs_fix}" = true ]; then
+        log "Auto-fixing genesis hashes in config.json..."
+        cp "${config_file}" "${config_file}.bak"
+
+        local jq_args=()
+        [ -n "${byron_hash}" ]   && jq_args+=(--arg bh "${byron_hash}")
+        [ -n "${shelley_hash}" ] && jq_args+=(--arg sh "${shelley_hash}")
+        [ -n "${alonzo_hash}" ]  && jq_args+=(--arg ah "${alonzo_hash}")
+        [ -n "${conway_hash}" ]  && jq_args+=(--arg ch "${conway_hash}")
+
+        local jq_expr=""
+        [ -n "${byron_hash}" ]   && jq_expr+='.ByronGenesisHash = $bh | '
+        [ -n "${shelley_hash}" ] && jq_expr+='.ShelleyGenesisHash = $sh | '
+        [ -n "${alonzo_hash}" ]  && jq_expr+='.AlonzoGenesisHash = $ah | '
+        [ -n "${conway_hash}" ]  && jq_expr+='.ConwayGenesisHash = $ch | '
+        jq_expr="${jq_expr% | }"  # Remove trailing ' | '
+
+        if jq "${jq_args[@]}" "${jq_expr}" "${config_file}" > "${config_file}.tmp" 2>/dev/null; then
+            mv "${config_file}.tmp" "${config_file}"
+            log "✅ Genesis hashes corrected in config.json"
+        else
+            warn "Failed to auto-fix genesis hashes, restoring backup"
+            mv "${config_file}.bak" "${config_file}"
+        fi
+        rm -f "${config_file}.bak"
+    else
+        log "✅ Genesis hashes verified OK"
     fi
 }
 
@@ -487,7 +599,6 @@ build_node_cmd() {
     local topology_file="${TOPOLOGY:-${CONFIG_DIR}/topology.json}"
     local db_path="${DB_DIR}"
     local socket_path="${CARDANO_NODE_SOCKET_PATH}"
-    local host="0.0.0.0"
 
     if [ ! -f "${config_file}" ]; then
         err "Config file not found: ${config_file}"; exit 1
@@ -501,8 +612,23 @@ build_node_cmd() {
     CMD="${CMD} --topology ${topology_file}"
     CMD="${CMD} --database-path ${db_path}"
     CMD="${CMD} --socket-path ${socket_path}"
-    CMD="${CMD} --host-addr ${host}"
+
+    # IPv4/IPv6/dual-stack support (IP_VERSION: 4, 6, or mix)
+    local ip_ver
+    ip_ver=$(echo "${IP_VERSION}" | tr '[:upper:]' '[:lower:]')
+    if [ "${ip_ver}" = "4" ] || [ "${ip_ver}" = "mix" ]; then
+        CMD="${CMD} --host-addr ${CNODE_LISTEN_IP4}"
+    fi
+    if [ "${ip_ver}" = "6" ] || [ "${ip_ver}" = "mix" ]; then
+        CMD="${CMD} --host-ipv6-addr ${CNODE_LISTEN_IP6}"
+    fi
+
     CMD="${CMD} --port ${NODE_PORT}"
+
+    # Mempool override (e.g. --mempool-capacity-override <bytes>)
+    if [ -n "${MEMPOOL_OVERRIDE}" ]; then
+        CMD="${CMD} ${MEMPOOL_OVERRIDE}"
+    fi
 
     # BP-specific: KES keys
     if [ "${NODE_MODE}" = "bp" ]; then
@@ -610,6 +736,7 @@ log "  Network:    ${NETWORK}"
 log "  Mode:       ${NODE_MODE}"
 log "  Port:       ${NODE_PORT}"
 log "  CPU Cores:  ${CPU_CORES}"
+log "  IP Version: ${IP_VERSION}"
 log "  Socket:     ${CARDANO_NODE_SOCKET_PATH}"
 if [ "${NODE_MODE}" = "bp" ]; then
     log "  Pool:       ${POOL_NAME:-unset}"
@@ -617,6 +744,9 @@ if [ "${NODE_MODE}" = "bp" ]; then
     log "  CNCLI:      ${CNCLI_ENABLED}"
     log "  Mithril:    ${MITHRIL_SIGNER:-${MITHRIL_SIGNER_ENABLED:-N}}"
     log "  PoolTool:   ${PT_API_KEY:+configured}${PT_API_KEY:-not set}"
+fi
+if [ -n "${MEMPOOL_OVERRIDE}" ]; then
+    log "  Mempool:    ${MEMPOOL_OVERRIDE}"
 fi
 log "============================================"
 
@@ -631,31 +761,34 @@ setup_network_configs
 # 3. Customise configs (bind 0.0.0.0, enable chattr)
 customise_configs
 
-# 4. Configure pool info in Guild scripts (BP mode)
+# 4. Pre-startup sanity checks (stale socket cleanup + genesis hash verification)
+pre_startup_sanity
+
+# 5. Configure pool info in Guild scripts (BP mode)
 configure_pool
 
-# 5. DB Backup/Restore
+# 6. DB Backup/Restore
 handle_backup_restore
 
-# 6. Mithril bootstrap (if enabled)
+# 7. Mithril bootstrap (if enabled)
 mithril_bootstrap
 
-# 7. Build node command
+# 8. Build node command
 NODE_CMD=$(build_node_cmd)
 log "Starting: ${NODE_CMD}"
 
-# 8. Launch cardano-node
+# 9. Launch cardano-node
 eval ${NODE_CMD} &
 NODE_PID=$!
 log "cardano-node started (PID ${NODE_PID})"
 
-# 9. Start CNCLI background processes (BP mode)
+# 10. Start CNCLI background processes (BP mode)
 start_cncli_processes
 
-# 10. Start mithril-signer if enabled (BP mode)
+# 11. Start mithril-signer if enabled (BP mode)
 start_mithril_signer
 
-# 11. Wait for node process
+# 12. Wait for node process
 wait ${NODE_PID}
 EXIT_CODE=$?
 log "cardano-node exited with code ${EXIT_CODE}"
