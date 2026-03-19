@@ -284,6 +284,21 @@ customise_configs() {
             jq '. + {"EnableP2P": true}' "${main_config}" > "${main_config}.tmp" && \
                 mv "${main_config}.tmp" "${main_config}"
         fi
+
+        # BP nodes: Switch GenesisMode → CardanoMode
+        # GenesisMode requires ≥5 big ledger peers to reach "CaughtUp" state, but a
+        # locked-down BP only connects to its own relays (which aren't big ledger peers).
+        # This leaves the node permanently stuck in "starting" / PreSyncing state.
+        # CardanoMode is the correct choice for BPs with restricted topology.
+        if [ "${NODE_MODE}" = "bp" ]; then
+            local current_mode
+            current_mode=$(jq -r '.ConsensusMode // empty' "${main_config}" 2>/dev/null)
+            if [ "${current_mode}" = "GenesisMode" ]; then
+                log "BP mode: Switching ConsensusMode from GenesisMode to CardanoMode"
+                jq '.ConsensusMode = "CardanoMode"' "${main_config}" > "${main_config}.tmp" && \
+                    mv "${main_config}.tmp" "${main_config}"
+            fi
+        fi
     fi
 
     # Enable CHATTR in CNTools if available
@@ -374,16 +389,18 @@ setup_network_configs() {
         *)       err "Unknown network: ${NETWORK}"; exit 1 ;;
     esac
 
-    # Config file precedence: CLI override > hybrid-configs > always download for network
+    # Config file precedence: CLI override > hybrid-configs > existing > download
     if [ -n "${CONFIG}" ] && [ -f "${CONFIG}" ]; then
         log "Using custom config: ${CONFIG}"
         cp "${CONFIG}" "${CONFIG_DIR}/config.json"
     elif [ -f "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" ]; then
         log "Using hybrid config override for ${NETWORK}"
         cp "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" "${CONFIG_DIR}/config.json"
-    else
+    elif [ ! -f "${CONFIG_DIR}/config.json" ]; then
         log "Downloading ${NETWORK} config.json..."
         curl -sS -o "${CONFIG_DIR}/config.json" "${BASE_URL}/config.json"
+    else
+        log "Using existing config.json (preserving local modifications)"
     fi
 
     # Topology file precedence: CLI override > hybrid-configs > existing > download
