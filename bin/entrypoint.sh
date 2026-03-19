@@ -248,14 +248,14 @@ setup_network_configs() {
         *)       err "Unknown network: ${NETWORK}"; exit 1 ;;
     esac
 
-    # Config file precedence: CLI override > hybrid-configs > existing > download
+    # Config file precedence: CLI override > hybrid-configs > always download for network
     if [ -n "${CONFIG}" ] && [ -f "${CONFIG}" ]; then
         log "Using custom config: ${CONFIG}"
         cp "${CONFIG}" "${CONFIG_DIR}/config.json"
     elif [ -f "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" ]; then
         log "Using hybrid config override for ${NETWORK}"
         cp "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" "${CONFIG_DIR}/config.json"
-    elif [ ! -f "${CONFIG_DIR}/config.json" ]; then
+    else
         log "Downloading ${NETWORK} config.json..."
         curl -sS -o "${CONFIG_DIR}/config.json" "${BASE_URL}/config.json"
     fi
@@ -272,10 +272,10 @@ setup_network_configs() {
         curl -sS -o "${CONFIG_DIR}/topology.json" "${BASE_URL}/topology.json"
     fi
 
-    # Download genesis files if missing
+    # Download genesis files for the requested network (always refresh to ensure correct network)
     for genesis in byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json; do
-        if [ ! -f "${CONFIG_DIR}/${genesis}" ]; then
-            log "Downloading ${genesis}..."
+        if true; then
+            log "Downloading ${genesis} for ${NETWORK}..."
             curl -sS -o "${CONFIG_DIR}/${genesis}" "${BASE_URL}/${genesis}" 2>/dev/null || \
                 warn "Could not download ${genesis} (may not exist for this network)"
         fi
