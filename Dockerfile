@@ -121,6 +121,11 @@ RUN useradd -m -d /home/guild -s /bin/bash -u 1000 guild && \
 COPY --from=build /build/bin/cardano-node /usr/local/bin/
 COPY --from=build /build/bin/cardano-cli  /usr/local/bin/
 
+# Copy shared libraries from build stage that are newer than Debian bookworm
+COPY --from=build /usr/local/lib/libsecp256k1.so.2     /usr/local/lib/
+COPY --from=build /usr/local/lib/libsecp256k1.so.2.0.2 /usr/local/lib/
+RUN ldconfig
+
 # Copy companion tools from Stage 2
 # Note: mithril debs install to /usr/bin, others to /usr/local/bin
 COPY --from=tools /usr/bin/mithril-client  /usr/local/bin/
