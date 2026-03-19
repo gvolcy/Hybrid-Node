@@ -16,7 +16,48 @@ Thumbs.db
 # Docker build cache
 .docker/
 
-# Secrets (never commit)
+# ============================================================================
+# POOL KEYS & SECRETS — NEVER COMMIT THESE
+# ============================================================================
+# Cardano signing keys
 *.skey
+# Cardano verification keys
 *.vkey
+# Cardano certificates (operational, KES, delegation)
 *.cert
+# Cardano node counter
+*.counter
+# Cold key files
+cold.*
+# KES key files
+kes.*
+# VRF key files
+vrf.*
+# Operational certificate files
+op.*
+opcert.*
+node.cert
+# Payment / stake keys
+payment.*
+stake.*
+# Any file with "key" or "secret" in the name
+*secret*
+*key.json
+# Pool metadata
+poolMetaData.json
+# Topology with real IPs (don't commit live topologies)
+topology-live.json
+# Environment files that may contain secrets
+.env
+.env.*
+*.env
+# Kubernetes secrets
+*-secret.yaml
+*-secrets.yaml
+# SSH keys
+id_rsa
+id_ed25519
+*.pem
+# GPG keys
+*.gpg
+*.asc

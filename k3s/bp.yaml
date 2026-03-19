@@ -1,31 +1,74 @@
-# Hybrid-Node Block Producer Deployment for K3s
+# ============================================================================
+# Hybrid-Node Block Producer for K3s
+# Features: preStop graceful shutdown, NetworkPolicy, mithril-keeper, CNCLI,
+#           PoolTool.io, all persistent volumes, disk-pressure toleration
+# ============================================================================
 # Usage:
-#   1. Create KES secret: kubectl create secret generic bp-kes-keys -n cardano \
-#        --from-file=kes.skey --from-file=vrf.skey --from-file=node.cert
-#   2. kubectl apply -f bp.yaml
+#   1. Create namespace:  kubectl create ns my-bp
+#   2. Create KES secret: kubectl -n my-bp create secret generic bp-kes-keys \
+#        --from-file=hot.skey --from-file=vrf.skey --from-file=op.cert
+#   3. Edit env vars below (POOL_NAME, POOL_ID, PT_API_KEY, etc.)
+#   4. kubectl apply -f bp.yaml
+# ============================================================================
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: cardano
+  name: cardano-bp
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: cardano-bp
-  namespace: cardano
+  namespace: cardano-bp
+---
+# RBAC for mithril-keeper CronJob
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cardano-bp-mithril-keeper
+  namespace: cardano-bp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cardano-bp-mithril-keeper
+  namespace: cardano-bp
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cardano-bp-mithril-keeper
+  namespace: cardano-bp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cardano-bp-mithril-keeper
+subjects:
+  - kind: ServiceAccount
+    name: cardano-bp-mithril-keeper
+    namespace: cardano-bp
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: cardano-bp
-  namespace: cardano
+  namespace: cardano-bp
   labels:
     app: cardano-bp
-    component: bp
+    network: mainnet
+    pool: CHANGE_ME
 spec:
-  serviceName: cardano-bp
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: cardano-bp
@@ -33,14 +76,20 @@ spec:
     metadata:
       labels:
         app: cardano-bp
-        component: bp
+        network: mainnet
+        pool: CHANGE_ME
     spec:
       serviceAccountName: cardano-bp
-      terminationGracePeriodSeconds: 120
+      hostname: cardano-bp
+      terminationGracePeriodSeconds: 300
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: cardano-node
           image: ghcr.io/volcyada/hybrid-node:latest
@@ -52,61 +101,232 @@ spec:
               value: "bp"
             - name: NODE_PORT
               value: "6000"
+            - name: CNODE_PORT
+              value: "6000"
+            - name: CPU_CORES
+              value: "4"
+            - name: POOL_NAME
+              value: "CHANGE_ME"
+            - name: POOL_ID
+              value: "CHANGE_ME"
+            - name: POOL_TICKER
+              value: "CHANGE_ME"
+            - name: PT_API_KEY
+              value: ""
+            - name: CARDANO_BLOCK_PRODUCER
+              value: "true"
             - name: MITHRIL_SIGNER
-              value: "N"
+              value: "Y"
+            - name: CNCLI_ENABLED
+              value: "Y"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
           ports:
             - containerPort: 6000
-              name: node
+              hostPort: 6000
+              name: cardano
               protocol: TCP
             - containerPort: 12798
-              name: metrics
+              name: prometheus
               protocol: TCP
+            - containerPort: 12788
+              name: ekg
+              protocol: TCP
+            - containerPort: 9090
+              name: mithril
+              protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    killall -s SIGINT cardano-node 2>/dev/null || true
+                    echo "Sent SIGINT, waiting for clean shutdown..."
+                    for i in $(seq 1 280); do
+                      [ -f /opt/cardano/cnode/db/clean ] && echo "Clean shutdown confirmed" && exit 0
+                      sleep 1
+                    done
+                    echo "Timeout waiting for clean shutdown"
+          livenessProbe:
+            tcpSocket:
+              port: 6000
+            initialDelaySeconds: 14400
+            periodSeconds: 30
+            failureThreshold: 20
+          readinessProbe:
+            tcpSocket:
+              port: 6000
+            initialDelaySeconds: 1200
+            periodSeconds: 10
+            failureThreshold: 10
           resources:
             requests:
-              memory: "8Gi"
-              cpu: "2"
-            limits:
-              memory: "24Gi"
               cpu: "4"
+              memory: "16Gi"
+            limits:
+              cpu: "8"
+              memory: "24Gi"
           volumeMounts:
-            - name: db
-              mountPath: /opt/cardano/cnode/db
-            - name: kes-keys
-              mountPath: /opt/cardano/cnode/priv/pool
-              readOnly: true
-          livenessProbe:
-            exec:
-              command: ["sh", "-c", "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"]
-            initialDelaySeconds: 300
-            periodSeconds: 60
-            timeoutSeconds: 10
-            failureThreshold: 5
+            - mountPath: /opt/cardano/cnode/db
+              name: db
+            - mountPath: /opt/cardano/cnode/priv
+              name: priv
+            - mountPath: /opt/cardano/cnode/mithril
+              name: mithril
+            - mountPath: /opt/cardano/cnode/scripts
+              name: scripts
+            - mountPath: /opt/cardano/cnode/logs
+              name: logs
+            - mountPath: /opt/cardano/cnode/sockets
+              name: sockets
+            - mountPath: /opt/cardano/cnode/guild-db
+              name: guild-db
+            - mountPath: /opt/cardano/cnode/files
+              name: files
       volumes:
-        - name: kes-keys
-          secret:
-            secretName: bp-kes-keys
-  volumeClaimTemplates:
-    - metadata:
-        name: db
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 100Gi
+        - name: db
+          hostPath:
+            path: /data/cardano/bp/db
+            type: DirectoryOrCreate
+        - name: priv
+          hostPath:
+            path: /data/cardano/bp/priv
+            type: Directory
+        - name: mithril
+          hostPath:
+            path: /data/cardano/bp/mithril
+            type: DirectoryOrCreate
+        - name: scripts
+          hostPath:
+            path: /data/cardano/bp/scripts
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/cardano/bp/logs
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /data/cardano/bp/sockets
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: /data/cardano/bp/guild-db
+            type: DirectoryOrCreate
+        - name: files
+          hostPath:
+            path: /data/cardano/bp/files
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: cardano-bp
-  namespace: cardano
+  name: cardano-bp-service
+  namespace: cardano-bp
 spec:
-  type: ClusterIP
+  type: NodePort
   ports:
     - port: 6000
       targetPort: 6000
-      name: node
+      name: cardano
     - port: 12798
       targetPort: 12798
-      name: metrics
+      name: prometheus
+    - port: 9090
+      targetPort: 9090
+      name: mithril
   selector:
     app: cardano-bp
+---
+# NetworkPolicy: only allow relay IPs to connect to BP
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bp-relay-only
+  namespace: cardano-bp
+spec:
+  podSelector:
+    matchLabels:
+      app: cardano-bp
+  policyTypes:
+    - Ingress
+  ingress:
+    # CHANGE THESE to your relay public IPs
+    - from:
+        - ipBlock:
+            cidr: 1.2.3.4/32  # relay1 IP
+      ports:
+        - port: 6000
+          protocol: TCP
+    - from:
+        - ipBlock:
+            cidr: 5.6.7.8/32  # relay2 IP
+      ports:
+        - port: 6000
+          protocol: TCP
+    # Allow K3s cluster-internal traffic
+    - from:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+    - from:
+        - ipBlock:
+            cidr: 10.43.0.0/16
+    - from:
+        - ipBlock:
+            cidr: 127.0.0.0/8
+---
+# Mithril-keeper: restarts mithril-signer if it crashes
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cardano-bp-mithril-keeper
+  namespace: cardano-bp
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          serviceAccountName: cardano-bp-mithril-keeper
+          restartPolicy: Never
+          containers:
+            - name: mithril-keeper
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  POD=$(kubectl get pods -n cardano-bp -l app=cardano-bp -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [[ -z "$POD" ]]; then
+                    echo "No pod found for cardano-bp"
+                    exit 0
+                  fi
+
+                  RUNNING=$(kubectl exec -n cardano-bp "$POD" -- bash -c 'ps -eo pid,stat,args | grep -v " Z " | grep -v grep | grep "mithril-signer" | wc -l' 2>/dev/null || echo "0")
+                  if [[ "$RUNNING" -gt 0 ]]; then
+                    echo "Mithril signer already running in $POD"
+                    exit 0
+                  fi
+
+                  if ! kubectl exec -n cardano-bp "$POD" -- test -S /opt/cardano/cnode/sockets/node.socket; then
+                    echo "Node socket not ready yet in $POD"
+                    exit 0
+                  fi
+
+                  echo "Starting mithril signer in $POD..."
+                  if kubectl exec -n cardano-bp "$POD" -- test -f /opt/cardano/cnode/mithril/autostart.sh; then
+                    kubectl exec -n cardano-bp "$POD" -- bash /opt/cardano/cnode/mithril/autostart.sh start
+                  elif kubectl exec -n cardano-bp "$POD" -- test -x /opt/cardano/cnode/scripts/mithril-signer.sh; then
+                    kubectl exec -n cardano-bp "$POD" -- bash /opt/cardano/cnode/scripts/mithril-signer.sh start
+                  fi
+                  echo "Mithril signer started in $POD"

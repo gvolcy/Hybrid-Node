@@ -79,7 +79,7 @@ ARG CNCLI_VERSION=6.7.0
 RUN ARCH="${TARGETARCH}" && \
     if [ "${ARCH}" = "amd64" ]; then \
       curl -sL "https://github.com/cardano-community/cncli/releases/download/v${CNCLI_VERSION}/cncli-${CNCLI_VERSION}-ubuntu22-x86_64-unknown-linux-gnu.tar.gz" \
-      | tar xz -C /usr/local/bin/ && \
+        | tar xz -C /usr/local/bin/ && \
       chmod +x /usr/local/bin/cncli; \
     else \
       echo "cncli not available for ${ARCH}, skipping"; \
@@ -101,21 +101,24 @@ ENV CNODE_HOME=/opt/cardano/cnode
 # SUDO=N tells guild-deploy.sh to skip sudo wrapper (required for Docker builds)
 ENV SUDO=N
 
-# Runtime dependencies
+# Runtime dependencies (includes e2fsprogs + sudo for CNTools chattr support)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash bc curl wget jq procps net-tools iproute2 \
     tcptraceroute sqlite3 tmux ncurses-bin \
     libsodium23 libsecp256k1-1 liblzma5 libz3-4 \
     libgmp10 libnuma1 libffi8 libtinfo6 \
     ca-certificates dnsutils \
+    e2fsprogs sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Create guild user (UID 1000 for K3s fsGroup compatibility)
 RUN useradd -m -d /home/guild -s /bin/bash -u 1000 guild && \
-    mkdir -p ${CNODE_HOME}/{db,logs,priv,scripts,files,guild-db,sockets} && \
+    mkdir -p ${CNODE_HOME}/{db,logs,priv,scripts,files,guild-db,sockets,mithril,backup} && \
     mkdir -p ${CNODE_HOME}/priv/pool && \
     mkdir -p /root/.local/bin && \
-    chown -R guild:guild /opt/cardano
+    chown -R guild:guild /opt/cardano && \
+    echo "guild ALL=NOPASSWD: /bin/chattr" > /etc/sudoers.d/cntools && \
+    chmod 0440 /etc/sudoers.d/cntools
 
 # Copy source-built binaries from Stage 1
 COPY --from=build /build/bin/cardano-node /usr/local/bin/
@@ -171,7 +174,7 @@ RUN bash -c 'networks=(guild mainnet preprod preview); \
 RUN for script in mithril-client.sh mithril-signer.sh mithril-relay.sh; do \
       curl -sS -o ${CNODE_HOME}/scripts/${script} \
         "https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
-      chmod +x ${CNODE_HOME}/scripts/${script} 2>/dev/null || true; \
+        chmod +x ${CNODE_HOME}/scripts/${script} 2>/dev/null || true; \
     done && chown -R guild:guild ${CNODE_HOME}/scripts/
 
 # Copy entrypoint and config overrides
@@ -185,23 +188,31 @@ RUN chown -R guild:guild ${CNODE_HOME}/hybrid-configs/
 ENV NETWORK=mainnet \
     NODE_MODE=relay \
     NODE_PORT=6000 \
-    CARDANO_NODE_SOCKET_PATH=${CNODE_HOME}/db/node.socket \
+    CNODE_PORT=6000 \
+    CARDANO_NODE_SOCKET_PATH=${CNODE_HOME}/sockets/node.socket \
     UPDATE_CHECK=N \
     MITHRIL_DOWNLOAD=N \
     MITHRIL_SIGNER=N \
+    CPU_CORES=2 \
+    CNCLI_ENABLED=N \
+    ENABLE_BACKUP=N \
+    ENABLE_RESTORE=N \
     RTS_OPTS="-N2 -I0 -A16m -qg -qb --disable-delayed-os-memory-return" \
+    EKG_HOST=0.0.0.0 \
+    PROMETHEUS_HOST=0.0.0.0 \
+    PROMETHEUS_PORT=12798 \
     PATH="${CNODE_HOME}/scripts:/usr/local/bin:${PATH}"
 
-# Expose node port and Prometheus metrics
-EXPOSE 6000 12798
+# Expose ports: node, Prometheus, EKG, Mithril metrics
+EXPOSE 6000 12798 12788 9090
 
 # Volumes for persistent data
-VOLUME ["${CNODE_HOME}/db", "${CNODE_HOME}/priv", "${CNODE_HOME}/logs"]
+VOLUME ["${CNODE_HOME}/db", "${CNODE_HOME}/priv", "${CNODE_HOME}/logs", \
+        "${CNODE_HOME}/guild-db", "${CNODE_HOME}/sockets", "${CNODE_HOME}/mithril"]
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
-    CMD cardano-cli query tip --socket-path ${CARDANO_NODE_SOCKET_PATH} 2>/dev/null \
-        | jq -e '.syncProgress' > /dev/null 2>&1 || exit 1
+# Healthcheck via socket test (faster than cardano-cli query)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=600s --retries=3 \
+    CMD test -S ${CARDANO_NODE_SOCKET_PATH} || exit 1
 
 USER guild
 WORKDIR ${CNODE_HOME}

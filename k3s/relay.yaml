@@ -1,28 +1,31 @@
-# Hybrid-Node Relay Deployment for K3s
-# Usage: kubectl apply -f relay.yaml
+# ============================================================================
+# Hybrid-Node Relay for K3s
+# Features: preStop graceful shutdown, all persistent volumes,
+#           disk-pressure toleration, socket-based probes
+# ============================================================================
+# Usage:
+#   1. Create namespace:  kubectl create ns cardano-relay
+#   2. Edit env vars below (NODE_PORT, NETWORK, etc.)
+#   3. kubectl apply -f relay.yaml
+# ============================================================================
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: cardano
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
   name: cardano-relay
-  namespace: cardano
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: cardano-relay
-  namespace: cardano
+  namespace: cardano-relay
   labels:
     app: cardano-relay
-    component: relay
+    network: mainnet
 spec:
-  serviceName: cardano-relay
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: cardano-relay
@@ -30,14 +33,18 @@ spec:
     metadata:
       labels:
         app: cardano-relay
-        component: relay
+        network: mainnet
     spec:
-      serviceAccountName: cardano-relay
-      terminationGracePeriodSeconds: 120
+      hostname: cardano-relay
+      terminationGracePeriodSeconds: 300
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: cardano-node
           image: ghcr.io/volcyada/hybrid-node:latest
@@ -49,53 +56,110 @@ spec:
               value: "relay"
             - name: NODE_PORT
               value: "3001"
+            - name: CNODE_PORT
+              value: "3001"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
           ports:
             - containerPort: 3001
-              name: node
+              hostPort: 3001
+              name: cardano
               protocol: TCP
             - containerPort: 12798
-              name: metrics
+              name: prometheus
               protocol: TCP
+            - containerPort: 12788
+              name: ekg
+              protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    killall -s SIGINT cardano-node 2>/dev/null || true
+                    echo "Sent SIGINT, waiting for clean shutdown..."
+                    for i in $(seq 1 280); do
+                      [ -f /opt/cardano/cnode/db/clean ] && echo "Clean shutdown confirmed" && exit 0
+                      sleep 1
+                    done
+                    echo "Timeout waiting for clean shutdown"
+          livenessProbe:
+            tcpSocket:
+              port: cardano
+            initialDelaySeconds: 14400
+            periodSeconds: 30
+            failureThreshold: 20
+          readinessProbe:
+            tcpSocket:
+              port: cardano
+            initialDelaySeconds: 1200
+            periodSeconds: 10
+            failureThreshold: 10
           resources:
             requests:
-              memory: "8Gi"
               cpu: "2"
+              memory: "12Gi"
             limits:
-              memory: "24Gi"
               cpu: "4"
+              memory: "20Gi"
           volumeMounts:
-            - name: db
-              mountPath: /opt/cardano/cnode/db
-          livenessProbe:
-            exec:
-              command: ["sh", "-c", "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"]
-            initialDelaySeconds: 300
-            periodSeconds: 60
-            timeoutSeconds: 10
-            failureThreshold: 5
-  volumeClaimTemplates:
-    - metadata:
-        name: db
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 100Gi
+            - mountPath: /opt/cardano/cnode/db
+              name: db
+            - mountPath: /opt/cardano/cnode/priv
+              name: priv
+            - mountPath: /opt/cardano/cnode/logs
+              name: logs
+            - mountPath: /opt/cardano/cnode/sockets
+              name: sockets
+            - mountPath: /opt/cardano/cnode/guild-db
+              name: guild-db
+            - mountPath: /opt/cardano/cnode/files
+              name: files
+      volumes:
+        - name: db
+          hostPath:
+            path: /data/cardano/relay/db
+            type: DirectoryOrCreate
+        - name: priv
+          hostPath:
+            path: /data/cardano/relay/priv
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/cardano/relay/logs
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /data/cardano/relay/sockets
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: /data/cardano/relay/guild-db
+            type: DirectoryOrCreate
+        - name: files
+          hostPath:
+            path: /data/cardano/relay/files
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: cardano-relay
-  namespace: cardano
+  name: cardano-relay-service
+  namespace: cardano-relay
 spec:
   type: NodePort
   ports:
     - port: 3001
       targetPort: 3001
-      nodePort: 30001
-      name: node
+      name: cardano
     - port: 12798
       targetPort: 12798
-      name: metrics
+      name: prometheus
   selector:
     app: cardano-relay

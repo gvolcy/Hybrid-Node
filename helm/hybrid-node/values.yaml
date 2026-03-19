@@ -18,21 +18,40 @@ cardano:
   mode: relay
   # Node port
   port: 6000
-  # GHC RTS options
-  rtsOpts: "-N2 -I0 -A16m -qg -qb --disable-delayed-os-memory-return"
+  # CPU cores for RTS -N flag
+  cpuCores: 2
+  # GHC RTS options (CPU_CORES is substituted into -N automatically)
+  rtsOpts: ""
   # Enable mithril download on first start
   mithrilDownload: "N"
   # Enable mithril signer (BP mode only)
   mithrilSigner: "N"
+  # Enable CNCLI processes (BP mode only: sync, leaderlog, validate)
+  cncliEnabled: "N"
   # Custom peers (comma-separated addr:port)
   customPeers: ""
+  # Enable DB backup on startup
+  enableBackup: "N"
+  # Enable DB restore on startup
+  enableRestore: "N"
+
+# For BP mode: pool configuration
+pool:
+  name: ""
+  id: ""
+  ticker: ""
+  # PoolTool.io API key (get from pooltool.io)
+  ptApiKey: ""
+  # Pool key directory (default: /opt/cardano/cnode/priv/pool/<poolName>)
+  dir: ""
 
 # For BP mode: mount KES keys from a K8s secret
 kesSecret:
   # Set to true and provide secretName to mount KES keys
   enabled: false
   secretName: ""
-  # Keys in the secret should be: kes.skey, vrf.skey, node.cert
+  # Keys in the secret: Guild (hot.skey, vrf.skey, op.cert)
+  #                  or CoinCashew (kes.skey, vrf.skey, node.cert)
 
 # Additional environment variables
 extraEnv: []
@@ -75,6 +94,32 @@ metrics:
     enabled: false
     interval: 30s
 
+# EKG monitoring
+ekg:
+  enabled: false
+  port: 12788
+
+# Mithril signer metrics
+mithrilMetrics:
+  enabled: false
+  port: 9090
+
+# Network policy for BP protection (only allow relay IPs)
+networkPolicy:
+  enabled: false
+  # List of relay IP CIDRs allowed to connect to BP
+  allowedRelayCIDRs: []
+    # - 1.2.3.4/32      # relay1 IP
+    # - 5.6.7.8/32      # relay2 IP
+  # Allow cluster-internal traffic
+  allowClusterTraffic: true
+
+# Mithril-keeper CronJob (restarts mithril-signer if it crashes)
+mithrilKeeper:
+  enabled: false
+  schedule: "*/5 * * * *"
+  image: bitnami/kubectl:latest
+
 persistence:
   # Database storage
   db:
@@ -82,20 +127,40 @@ persistence:
     storageClass: ""
     accessMode: ReadWriteOnce
     size: 100Gi
-    # Use existing PVC
     existingClaim: ""
-  # Logs storage (optional)
+  # Guild-DB storage (cncli database, logs)
+  guildDb:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 5Gi
+    existingClaim: ""
+  # Logs storage
   logs:
     enabled: false
     storageClass: ""
     accessMode: ReadWriteOnce
     size: 10Gi
     existingClaim: ""
+  # Mithril data
+  mithril:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 5Gi
+    existingClaim: ""
 
 # Use hostPath instead of PVC (for K3s single-node setups)
 hostPath:
   enabled: false
   dbPath: ""
+  privPath: ""
+  guildDbPath: ""
+  logsPath: ""
+  socketsPath: ""
+  mithrilPath: ""
+  scriptsPath: ""
+  filesPath: ""
   # Example: /data/cardano/relay1/db
 
 resources:
@@ -108,7 +173,10 @@ resources:
 
 nodeSelector: {}
 
-tolerations: []
+tolerations:
+  - key: node.kubernetes.io/disk-pressure
+    operator: Exists
+    effect: NoSchedule
 
 affinity: {}
 
@@ -117,3 +185,27 @@ topologyOverride: ""
 
 # Config override (raw JSON)
 configOverride: ""
+
+# Pod hostname (useful for log identification)
+hostname: ""
+
+# Deployment strategy (Recreate is required — two nodes can't share the same DB)
+strategy:
+  type: Recreate
+
+# Graceful shutdown timeout (cardano-node needs up to 300s)
+terminationGracePeriodSeconds: 300
+
+# Liveness probe configuration
+livenessProbe:
+  initialDelaySeconds: 3600
+  periodSeconds: 60
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+# Readiness probe configuration
+readinessProbe:
+  initialDelaySeconds: 600
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 10

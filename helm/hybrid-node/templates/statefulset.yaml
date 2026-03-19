@@ -10,6 +10,10 @@ spec:
   selector:
     matchLabels:
       {{- include "hybrid-node.selectorLabels" . | nindent 6 }}
+  {{- with .Values.strategy }}
+  updateStrategy:
+    type: {{ .type }}
+  {{- end }}
   template:
     metadata:
       annotations:
@@ -18,6 +22,8 @@ spec:
         {{- end }}
       labels:
         {{- include "hybrid-node.selectorLabels" . | nindent 8 }}
+        network: {{ .Values.cardano.network }}
+        mode: {{ .Values.cardano.mode }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -26,7 +32,10 @@ spec:
       serviceAccountName: {{ include "hybrid-node.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      terminationGracePeriodSeconds: 120
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- if .Values.hostname }}
+      hostname: {{ .Values.hostname }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -40,15 +49,53 @@ spec:
               value: {{ .Values.cardano.mode | quote }}
             - name: NODE_PORT
               value: {{ .Values.cardano.port | quote }}
+            - name: CNODE_PORT
+              value: {{ .Values.cardano.port | quote }}
+            - name: CPU_CORES
+              value: {{ .Values.cardano.cpuCores | quote }}
+            {{- if .Values.cardano.rtsOpts }}
             - name: RTS_OPTS
               value: {{ .Values.cardano.rtsOpts | quote }}
+            {{- end }}
             - name: MITHRIL_DOWNLOAD
               value: {{ .Values.cardano.mithrilDownload | quote }}
             - name: MITHRIL_SIGNER
               value: {{ .Values.cardano.mithrilSigner | quote }}
+            - name: CNCLI_ENABLED
+              value: {{ .Values.cardano.cncliEnabled | quote }}
+            - name: ENABLE_BACKUP
+              value: {{ .Values.cardano.enableBackup | quote }}
+            - name: ENABLE_RESTORE
+              value: {{ .Values.cardano.enableRestore | quote }}
             {{- if .Values.cardano.customPeers }}
             - name: CUSTOM_PEERS
               value: {{ .Values.cardano.customPeers | quote }}
+            {{- end }}
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: {{ .Values.metrics.port | quote }}
+            {{- if .Values.pool.name }}
+            - name: POOL_NAME
+              value: {{ .Values.pool.name | quote }}
+            {{- end }}
+            {{- if .Values.pool.id }}
+            - name: POOL_ID
+              value: {{ .Values.pool.id | quote }}
+            {{- end }}
+            {{- if .Values.pool.ticker }}
+            - name: POOL_TICKER
+              value: {{ .Values.pool.ticker | quote }}
+            {{- end }}
+            {{- if .Values.pool.ptApiKey }}
+            - name: PT_API_KEY
+              value: {{ .Values.pool.ptApiKey | quote }}
+            {{- end }}
+            {{- if .Values.pool.dir }}
+            - name: POOL_DIR
+              value: {{ .Values.pool.dir | quote }}
             {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -62,38 +109,85 @@ spec:
               containerPort: {{ .Values.metrics.port }}
               protocol: TCP
             {{- end }}
+            {{- if .Values.ekg.enabled }}
+            - name: ekg
+              containerPort: {{ .Values.ekg.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.mithrilMetrics.enabled }}
+            - name: mithril
+              containerPort: {{ .Values.mithrilMetrics.port }}
+              protocol: TCP
+            {{- end }}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    killall -s SIGINT cardano-node 2>/dev/null || true
+                    echo "Sent SIGINT, waiting for clean shutdown..."
+                    for i in $(seq 1 280); do
+                      [ -f /opt/cardano/cnode/db/clean ] && echo "Clean shutdown confirmed" && exit 0
+                      sleep 1
+                    done
+                    echo "Timeout waiting for clean shutdown"
           livenessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"
-            initialDelaySeconds: 300
-            periodSeconds: 60
-            timeoutSeconds: 10
-            failureThreshold: 5
+                - "test -S /opt/cardano/cnode/sockets/node.socket"
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
           readinessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - "cardano-cli query tip --socket-path /opt/cardano/cnode/db/node.socket 2>/dev/null | jq -e '.syncProgress' > /dev/null 2>&1"
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 10
+                - "test -S /opt/cardano/cnode/sockets/node.socket"
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: db
               mountPath: /opt/cardano/cnode/db
-            {{- if .Values.persistence.logs.enabled }}
+            - name: sockets
+              mountPath: /opt/cardano/cnode/sockets
+            {{- if or .Values.persistence.guildDb.enabled (and .Values.hostPath.enabled .Values.hostPath.guildDbPath) }}
+            - name: guild-db
+              mountPath: /opt/cardano/cnode/guild-db
+            {{- end }}
+            {{- if or .Values.persistence.logs.enabled (and .Values.hostPath.enabled .Values.hostPath.logsPath) }}
             - name: logs
               mountPath: /opt/cardano/cnode/logs
+            {{- end }}
+            {{- if or .Values.persistence.mithril.enabled (and .Values.hostPath.enabled .Values.hostPath.mithrilPath) }}
+            - name: mithril
+              mountPath: /opt/cardano/cnode/mithril
             {{- end }}
             {{- if .Values.kesSecret.enabled }}
             - name: kes-keys
               mountPath: /opt/cardano/cnode/priv/pool
               readOnly: true
+            {{- end }}
+            {{- if and .Values.hostPath.enabled .Values.hostPath.privPath }}
+            - name: priv
+              mountPath: /opt/cardano/cnode/priv
+            {{- end }}
+            {{- if and .Values.hostPath.enabled .Values.hostPath.scriptsPath }}
+            - name: scripts
+              mountPath: /opt/cardano/cnode/scripts
+            {{- end }}
+            {{- if and .Values.hostPath.enabled .Values.hostPath.filesPath }}
+            - name: files
+              mountPath: /opt/cardano/cnode/files
             {{- end }}
             {{- if .Values.topologyOverride }}
             - name: topology
@@ -106,6 +200,8 @@ spec:
               subPath: config.json
             {{- end }}
       volumes:
+        - name: sockets
+          emptyDir: {}
         {{- if .Values.kesSecret.enabled }}
         - name: kes-keys
           secret:
@@ -122,10 +218,48 @@ spec:
             name: {{ include "hybrid-node.fullname" . }}-config
         {{- end }}
         {{- if .Values.hostPath.enabled }}
+        {{- if .Values.hostPath.dbPath }}
         - name: db
           hostPath:
             path: {{ .Values.hostPath.dbPath }}
             type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.hostPath.privPath }}
+        - name: priv
+          hostPath:
+            path: {{ .Values.hostPath.privPath }}
+            type: Directory
+        {{- end }}
+        {{- if .Values.hostPath.guildDbPath }}
+        - name: guild-db
+          hostPath:
+            path: {{ .Values.hostPath.guildDbPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.hostPath.logsPath }}
+        - name: logs
+          hostPath:
+            path: {{ .Values.hostPath.logsPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.hostPath.mithrilPath }}
+        - name: mithril
+          hostPath:
+            path: {{ .Values.hostPath.mithrilPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.hostPath.scriptsPath }}
+        - name: scripts
+          hostPath:
+            path: {{ .Values.hostPath.scriptsPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.hostPath.filesPath }}
+        - name: files
+          hostPath:
+            path: {{ .Values.hostPath.filesPath }}
+            type: Directory
+        {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -152,6 +286,19 @@ spec:
         resources:
           requests:
             storage: {{ .Values.persistence.db.size }}
+    {{- if .Values.persistence.guildDb.enabled }}
+    - metadata:
+        name: guild-db
+      spec:
+        accessModes:
+          - {{ .Values.persistence.guildDb.accessMode }}
+        {{- if .Values.persistence.guildDb.storageClass }}
+        storageClassName: {{ .Values.persistence.guildDb.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.guildDb.size }}
+    {{- end }}
     {{- if .Values.persistence.logs.enabled }}
     - metadata:
         name: logs
@@ -164,5 +311,18 @@ spec:
         resources:
           requests:
             storage: {{ .Values.persistence.logs.size }}
+    {{- end }}
+    {{- if .Values.persistence.mithril.enabled }}
+    - metadata:
+        name: mithril
+      spec:
+        accessModes:
+          - {{ .Values.persistence.mithril.accessMode }}
+        {{- if .Values.persistence.mithril.storageClass }}
+        storageClassName: {{ .Values.persistence.mithril.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.mithril.size }}
     {{- end }}
   {{- end }}

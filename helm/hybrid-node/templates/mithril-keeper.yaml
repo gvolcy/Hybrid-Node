@@ -1,0 +1,98 @@
+{{- if .Values.mithrilKeeper.enabled }}
+# ServiceAccount for mithril-keeper to exec into the node pod
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}-mithril-keeper
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+---
+# Role to list pods and exec into them
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}-mithril-keeper
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}-mithril-keeper
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "hybrid-node.fullname" . }}-mithril-keeper
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hybrid-node.fullname" . }}-mithril-keeper
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}-mithril-keeper
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.mithrilKeeper.schedule | quote }}
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          serviceAccountName: {{ include "hybrid-node.fullname" . }}-mithril-keeper
+          restartPolicy: Never
+          containers:
+            - name: mithril-keeper
+              image: {{ .Values.mithrilKeeper.image }}
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  NAMESPACE="{{ .Release.Namespace }}"
+                  APP_LABEL="{{ include "hybrid-node.selectorLabels" . | replace ": " "=" | replace "\n" "," }}"
+                  
+                  POD=$(kubectl get pods -n "$NAMESPACE" -l "{{ include "hybrid-node.name" . }}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [[ -z "$POD" ]]; then
+                    echo "No pod found"
+                    exit 0
+                  fi
+
+                  # Check if mithril signer is running (zombie-aware)
+                  RUNNING=$(kubectl exec -n "$NAMESPACE" "$POD" -- bash -c 'ps -eo pid,stat,args | grep -v " Z " | grep -v grep | grep "mithril-signer" | wc -l' 2>/dev/null || echo "0")
+                  if [[ "$RUNNING" -gt 0 ]]; then
+                    echo "Mithril signer already running in $POD"
+                    exit 0
+                  fi
+
+                  # Check if node socket exists
+                  if ! kubectl exec -n "$NAMESPACE" "$POD" -- test -S /opt/cardano/cnode/sockets/node.socket; then
+                    echo "Node socket not ready yet in $POD"
+                    exit 0
+                  fi
+
+                  echo "Starting mithril signer in $POD..."
+                  if kubectl exec -n "$NAMESPACE" "$POD" -- test -f /opt/cardano/cnode/mithril/autostart.sh; then
+                    kubectl exec -n "$NAMESPACE" "$POD" -- bash /opt/cardano/cnode/mithril/autostart.sh start
+                  elif kubectl exec -n "$NAMESPACE" "$POD" -- test -x /opt/cardano/cnode/scripts/mithril-signer.sh; then
+                    kubectl exec -n "$NAMESPACE" "$POD" -- bash /opt/cardano/cnode/scripts/mithril-signer.sh start
+                  else
+                    echo "No mithril start script found"
+                    exit 0
+                  fi
+                  echo "Mithril signer started in $POD"
+{{- end }}

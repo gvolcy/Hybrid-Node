@@ -1,0 +1,37 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hybrid-node.fullname" . }}-bp-relay-only
+  labels:
+    {{- include "hybrid-node.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hybrid-node.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow traffic from specified relay IPs on node port only
+    {{- range .Values.networkPolicy.allowedRelayCIDRs }}
+    - from:
+        - ipBlock:
+            cidr: {{ . }}
+      ports:
+        - port: {{ $.Values.cardano.port }}
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.networkPolicy.allowClusterTraffic }}
+    # Allow all cluster-internal traffic (pod and service CIDRs)
+    - from:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+    - from:
+        - ipBlock:
+            cidr: 10.43.0.0/16
+    # Allow localhost
+    - from:
+        - ipBlock:
+            cidr: 127.0.0.0/8
+    {{- end }}
+{{- end }}

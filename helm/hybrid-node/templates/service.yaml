@@ -24,5 +24,17 @@ spec:
       protocol: TCP
       name: metrics
     {{- end }}
+    {{- if .Values.ekg.enabled }}
+    - port: {{ .Values.ekg.port }}
+      targetPort: ekg
+      protocol: TCP
+      name: ekg
+    {{- end }}
+    {{- if .Values.mithrilMetrics.enabled }}
+    - port: {{ .Values.mithrilMetrics.port }}
+      targetPort: mithril
+      protocol: TCP
+      name: mithril
+    {{- end }}
   selector:
     {{- include "hybrid-node.selectorLabels" . | nindent 4 }}

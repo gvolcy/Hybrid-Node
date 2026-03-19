@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Hybrid-Node Entrypoint
-# Handles: network config, mithril bootstrap, BP/relay mode, signal handling
+# Handles: network config, mithril bootstrap, BP/relay mode, cncli processes,
+#          PoolTool.io reporting, signal handling, graceful shutdown
 # ============================================================================
 set -eo pipefail
 
@@ -16,77 +17,222 @@ err()  { echo -e "${RED}[hybrid-node]${NC} ERROR: $*" >&2; }
 : "${NODE_MODE:=relay}"
 : "${NODE_PORT:=6000}"
 : "${CNODE_HOME:=/opt/cardano/cnode}"
+: "${CNODE_PORT:=${NODE_PORT}}"
 : "${MITHRIL_DOWNLOAD:=N}"
 : "${MITHRIL_SIGNER:=N}"
 : "${UPDATE_CHECK:=N}"
-: "${RTS_OPTS:=-N2 -I0 -A16m -qg -qb --disable-delayed-os-memory-return}"
+: "${CPU_CORES:=2}"
+: "${RTS_OPTS:=-N${CPU_CORES} -I0 -A16m -qg -qb --disable-delayed-os-memory-return}"
+: "${ENABLE_BACKUP:=N}"
+: "${ENABLE_RESTORE:=N}"
+: "${CNCLI_ENABLED:=N}"
+: "${CARDANO_BLOCK_PRODUCER:=false}"
+: "${EKG_HOST:=0.0.0.0}"
+: "${PROMETHEUS_HOST:=0.0.0.0}"
+: "${PROMETHEUS_PORT:=12798}"
 
-export CNODE_HOME NODE_PORT NETWORK
-export CARDANO_NODE_SOCKET_PATH="${CNODE_HOME}/db/node.socket"
+# Pool configuration (BP mode)
+: "${POOL_NAME:=}"
+: "${POOL_DIR:=}"
+: "${POOL_ID:=}"
+: "${POOL_TICKER:=}"
+: "${PT_API_KEY:=}"
+
+export CNODE_HOME CNODE_PORT NODE_PORT NETWORK
+export CARDANO_NODE_SOCKET_PATH="${CNODE_HOME}/sockets/node.socket"
 
 DB_DIR="${CNODE_HOME}/db"
 CONFIG_DIR="${CNODE_HOME}/files"
 HYBRID_CONFIG_DIR="${CNODE_HOME}/hybrid-configs"
+GUILD_DB_DIR="${CNODE_HOME}/guild-db"
+LOGS_DIR="${CNODE_HOME}/logs"
+SOCKETS_DIR="${CNODE_HOME}/sockets"
+MITHRIL_DIR="${CNODE_HOME}/mithril"
+
+# Ensure directories exist
+mkdir -p "${DB_DIR}" "${CONFIG_DIR}" "${GUILD_DB_DIR}" "${LOGS_DIR}" "${SOCKETS_DIR}" "${MITHRIL_DIR}" "${CNODE_HOME}/priv/pool" "${CNODE_HOME}/scripts"
 
 # ----- Signal handling -----
 NODE_PID=""
 SIGNER_PID=""
+CNCLI_PIDS=()
 
 cleanup() {
     log "Received shutdown signal, cleaning up..."
+
+    # Stop cncli background processes
+    for pid in "${CNCLI_PIDS[@]}"; do
+        if kill -0 "${pid}" 2>/dev/null; then
+            log "Stopping cncli process (PID ${pid})..."
+            kill -SIGTERM "${pid}" 2>/dev/null || true
+        fi
+    done
+
+    # Stop mithril-signer
     if [ -n "${SIGNER_PID}" ] && kill -0 "${SIGNER_PID}" 2>/dev/null; then
         log "Stopping mithril-signer (PID ${SIGNER_PID})..."
         kill -SIGTERM "${SIGNER_PID}" 2>/dev/null
         wait "${SIGNER_PID}" 2>/dev/null || true
     fi
+
+    # Stop cardano-node with SIGINT (it expects SIGINT for graceful shutdown)
     if [ -n "${NODE_PID}" ] && kill -0 "${NODE_PID}" 2>/dev/null; then
-        log "Stopping cardano-node (PID ${NODE_PID})..."
+        log "Stopping cardano-node (PID ${NODE_PID}) with SIGINT..."
         kill -SIGINT "${NODE_PID}" 2>/dev/null
-        # cardano-node needs time for graceful shutdown
-        local timeout=60
+
+        # Wait up to 280s for clean shutdown (checks for db/clean marker)
+        local timeout=280
         while kill -0 "${NODE_PID}" 2>/dev/null && [ $timeout -gt 0 ]; do
+            if [ -f "${DB_DIR}/clean" ]; then
+                log "Clean shutdown confirmed (db/clean marker found)"
+                break
+            fi
             sleep 1
             timeout=$((timeout - 1))
         done
+
         if kill -0 "${NODE_PID}" 2>/dev/null; then
-            warn "Node didn't stop gracefully, sending SIGKILL"
+            warn "Node didn't stop gracefully after 280s, sending SIGKILL"
             kill -SIGKILL "${NODE_PID}" 2>/dev/null
+        else
+            log "cardano-node stopped gracefully"
         fi
     fi
+
     log "Shutdown complete."
     exit 0
 }
 
 trap cleanup SIGTERM SIGINT SIGQUIT
 
+# ----- Install runtime dependencies if missing -----
+install_runtime_deps() {
+    local need_install=false
+
+    if ! command -v chattr &>/dev/null; then
+        need_install=true
+    fi
+    if ! command -v sudo &>/dev/null; then
+        need_install=true
+    fi
+
+    if [ "${need_install}" = true ]; then
+        log "Installing runtime dependencies (e2fsprogs, sudo)..."
+        apt-get update -qq 2>/dev/null && \
+            apt-get install -y --no-install-recommends e2fsprogs sudo >/dev/null 2>&1 || \
+            warn "Could not install e2fsprogs/sudo (running as non-root?)"
+
+        # Configure sudo for CNTools chattr support
+        if command -v sudo &>/dev/null; then
+            if [ -w /etc/sudoers.d/ ]; then
+                echo "guild ALL=NOPASSWD: /bin/chattr" > /etc/sudoers.d/cntools 2>/dev/null || true
+                chmod 0440 /etc/sudoers.d/cntools 2>/dev/null || true
+            fi
+        fi
+    fi
+}
+
+# ----- Customise Guild configs for monitoring access -----
+customise_configs() {
+    log "Customising config files for external access..."
+
+    # Bind EKG and Prometheus to 0.0.0.0 instead of 127.0.0.1
+    find "${CONFIG_DIR}" -name "*config*.json" -print0 2>/dev/null | \
+        xargs -0 sed -i 's/127.0.0.1/0.0.0.0/g' 2>/dev/null || true
+
+    # Fix hasEKG format for external access
+    find "${CONFIG_DIR}" -name "*config*.json" -print0 2>/dev/null | \
+        xargs -0 sed -i 's/"hasEKG": 12788,/"hasEKG": [\n    "0.0.0.0",\n    12788\n],/g' 2>/dev/null || true
+
+    # Enable CHATTR in CNTools if available
+    if [ -f "${CNODE_HOME}/scripts/cntools.sh" ]; then
+        grep -qi ENABLE_CHATTR "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null && \
+            sed -i 's/#ENABLE_CHATTR=false/ENABLE_CHATTR=true/g' "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null || true
+    fi
+}
+
+# ----- Configure pool information in Guild scripts -----
+configure_pool() {
+    if [ "${NODE_MODE}" != "bp" ]; then
+        return
+    fi
+
+    log "Configuring pool information..."
+
+    # Set POOL_DIR default based on POOL_NAME if not explicitly set
+    if [ -z "${POOL_DIR}" ] && [ -n "${POOL_NAME}" ]; then
+        POOL_DIR="${CNODE_HOME}/priv/pool/${POOL_NAME}"
+    fi
+
+    # Configure Guild env file with pool information
+    local env_file="${CNODE_HOME}/scripts/env"
+    if [ -f "${env_file}" ]; then
+        if [ -n "${POOL_NAME}" ]; then
+            sed -i "s|#POOL_NAME=\"\"|POOL_NAME=\"${POOL_NAME}\"|g" "${env_file}" 2>/dev/null || true
+            # Also update if already set to a different value
+            sed -i "s|^POOL_NAME=.*|POOL_NAME=\"${POOL_NAME}\"|g" "${env_file}" 2>/dev/null || true
+        fi
+        if [ -n "${CNODE_PORT}" ]; then
+            sed -i "s|#CNODE_PORT=.*|CNODE_PORT=${CNODE_PORT}|g" "${env_file}" 2>/dev/null || true
+        fi
+    fi
+
+    # Configure cncli.sh with pool information
+    local cncli_script="${CNODE_HOME}/scripts/cncli.sh"
+    if [ -f "${cncli_script}" ]; then
+        [ -n "${POOL_ID}" ] && \
+            sed -i "s|POOL_ID=\".*\"|POOL_ID=\"${POOL_ID}\"|g" "${cncli_script}" 2>/dev/null || true
+        [ -n "${POOL_TICKER}" ] && \
+            sed -i "s|POOL_TICKER=\".*\"|POOL_TICKER=\"${POOL_TICKER}\"|g" "${cncli_script}" 2>/dev/null || true
+        [ -n "${PT_API_KEY}" ] && \
+            sed -i "s|PT_API_KEY=\".*\"|PT_API_KEY=\"${PT_API_KEY}\"|g" "${cncli_script}" 2>/dev/null || true
+    fi
+
+    log "Pool configured: name=${POOL_NAME:-unset} ticker=${POOL_TICKER:-unset} id=${POOL_ID:0:16}..."
+}
+
+# ----- DB backup / restore -----
+handle_backup_restore() {
+    if [ "${ENABLE_BACKUP}" != "Y" ] && [ "${ENABLE_RESTORE}" != "Y" ]; then
+        return
+    fi
+
+    local backup_dir="${CNODE_HOME}/backup/${NETWORK}-db"
+    mkdir -p "${backup_dir}"
+
+    local dbsize=$(du -s "${DB_DIR}" 2>/dev/null | awk '{print $1}')
+    local bksize=$(du -s "${backup_dir}" 2>/dev/null | awk '{print $1}')
+    dbsize=${dbsize:-0}
+    bksize=${bksize:-0}
+
+    if [ "${ENABLE_RESTORE}" = "Y" ] && [ "${dbsize}" -lt "${bksize}" ]; then
+        log "Restoring database from backup (${bksize}K > ${dbsize}K)..."
+        cp -rf "${backup_dir}"/* "${DB_DIR}/" 2>/dev/null || true
+        log "Database restore complete"
+    fi
+
+    if [ "${ENABLE_BACKUP}" = "Y" ] && [ "${dbsize}" -gt "${bksize}" ]; then
+        log "Backing up database (${dbsize}K > ${bksize}K)..."
+        cp -rf "${DB_DIR}"/* "${backup_dir}/" 2>/dev/null || true
+        log "Database backup complete"
+    fi
+}
+
 # ----- Network configuration -----
 setup_network_configs() {
     log "Setting up network configs for: ${NETWORK}"
 
-    # Map network names to IOG config URLs
     local BASE_URL=""
     case "${NETWORK}" in
-        mainnet)
-            BASE_URL="https://book.play.dev.cardano.org/environments/mainnet"
-            ;;
-        preview)
-            BASE_URL="https://book.play.dev.cardano.org/environments/preview"
-            ;;
-        preprod)
-            BASE_URL="https://book.play.dev.cardano.org/environments/preprod"
-            ;;
-        guild)
-            BASE_URL="https://book.play.dev.cardano.org/environments/sanchonet"
-            warn "Guild network uses sanchonet configs"
-            ;;
-        *)
-            err "Unknown network: ${NETWORK}"
-            err "Supported: mainnet, preview, preprod, guild"
-            exit 1
-            ;;
+        mainnet) BASE_URL="https://book.play.dev.cardano.org/environments/mainnet" ;;
+        preview) BASE_URL="https://book.play.dev.cardano.org/environments/preview" ;;
+        preprod) BASE_URL="https://book.play.dev.cardano.org/environments/preprod" ;;
+        guild)   BASE_URL="https://book.play.dev.cardano.org/environments/sanchonet"
+                 warn "Guild network uses sanchonet configs" ;;
+        *)       err "Unknown network: ${NETWORK}"; exit 1 ;;
     esac
 
-    # Check for user-provided config overrides
+    # Config file precedence: CLI override > hybrid-configs > existing > download
     if [ -n "${CONFIG}" ] && [ -f "${CONFIG}" ]; then
         log "Using custom config: ${CONFIG}"
         cp "${CONFIG}" "${CONFIG_DIR}/config.json"
@@ -98,6 +244,7 @@ setup_network_configs() {
         curl -sS -o "${CONFIG_DIR}/config.json" "${BASE_URL}/config.json"
     fi
 
+    # Topology file precedence: CLI override > hybrid-configs > existing > download
     if [ -n "${TOPOLOGY}" ] && [ -f "${TOPOLOGY}" ]; then
         log "Using custom topology: ${TOPOLOGY}"
         cp "${TOPOLOGY}" "${CONFIG_DIR}/topology.json"
@@ -133,7 +280,6 @@ add_custom_peers() {
         return
     fi
 
-    # Parse CUSTOM_PEERS format: addr1:port1,addr2:port2,...
     local peers_json="[]"
     IFS=',' read -ra PEER_LIST <<< "${CUSTOM_PEERS}"
     for peer in "${PEER_LIST[@]}"; do
@@ -145,9 +291,7 @@ add_custom_peers() {
             '. += [{"address": $a, "port": ($p | tonumber)}]')
     done
 
-    # Merge into existing topology (P2P format)
     if jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
-        # P2P topology format
         jq --argjson peers "${peers_json}" \
             '.localRoots += [{"accessPoints": $peers, "advertise": false, "trustable": false, "valency": ($peers | length)}]' \
             "${topology}" > "${topology}.tmp" && mv "${topology}.tmp" "${topology}"
@@ -161,7 +305,6 @@ mithril_bootstrap() {
         return
     fi
 
-    # Skip if DB already exists and has meaningful data
     if [ -d "${DB_DIR}/immutable" ] && [ "$(ls -A "${DB_DIR}/immutable/" 2>/dev/null | wc -l)" -gt 0 ]; then
         log "Database already exists ($(du -sh "${DB_DIR}" | cut -f1)), skipping Mithril download"
         return
@@ -174,7 +317,6 @@ mithril_bootstrap() {
 
     log "Bootstrapping ${NETWORK} database via Mithril..."
 
-    # Set Mithril aggregator URL based on network
     local MITHRIL_AGGREGATOR=""
     case "${NETWORK}" in
         mainnet) MITHRIL_AGGREGATOR="https://aggregator.release-mainnet.api.mithril.network/aggregator" ;;
@@ -199,7 +341,8 @@ mithril_bootstrap() {
 
 # ----- Start mithril-signer (BP mode) -----
 start_mithril_signer() {
-    if [ "${MITHRIL_SIGNER}" != "Y" ] && [ "${MITHRIL_SIGNER}" != "y" ]; then
+    if [ "${MITHRIL_SIGNER}" != "Y" ] && [ "${MITHRIL_SIGNER}" != "y" ] && \
+       [ "${MITHRIL_SIGNER_ENABLED}" != "Y" ]; then
         return
     fi
 
@@ -213,16 +356,113 @@ start_mithril_signer() {
         return
     fi
 
-    log "Starting mithril-signer in background..."
-    # Use guild's mithril-signer.sh if available, otherwise direct binary
-    if [ -x "${CNODE_HOME}/scripts/mithril-signer.sh" ]; then
-        bash "${CNODE_HOME}/scripts/mithril-signer.sh" &
+    log "Scheduling mithril-signer startup (waits for node to be operational)..."
+    (
+        # Wait for cardano-node socket
+        while [ ! -S "${CARDANO_NODE_SOCKET_PATH}" ]; do
+            sleep 10
+        done
+        log "  [mithril] Node socket ready ✓"
+
+        # Wait for node to be responsive
+        while ! timeout 10s cardano-cli query tip --socket-path "${CARDANO_NODE_SOCKET_PATH}" ${NETWORK_FLAG} >/dev/null 2>&1; do
+            sleep 15
+        done
+        log "  [mithril] Node responding to queries ✓"
+
+        # Wait for reasonable sync progress (>90%)
+        while true; do
+            local sync
+            sync=$(timeout 10s cardano-cli query tip --socket-path "${CARDANO_NODE_SOCKET_PATH}" ${NETWORK_FLAG} 2>/dev/null | jq -r '.syncProgress // "0"' | sed 's/%//' || echo "0")
+            if [ -n "${sync}" ] && [ "$(echo "${sync} > 90" | bc -l 2>/dev/null || echo 0)" -eq 1 ]; then
+                log "  [mithril] Sync progress: ${sync}% ✓"
+                break
+            fi
+            sleep 30
+        done
+
+        sleep 30
+        log "🚀 Starting Mithril Signer..."
+
+        # Load mithril environment if available
+        if [ -f "${MITHRIL_DIR}/mithril.env" ]; then
+            set -a && . "${MITHRIL_DIR}/mithril.env" && set +a
+        fi
+
+        export CARDANO_NODE_SOCKET_PATH="${CARDANO_NODE_SOCKET_PATH}"
+
+        if [ -x "${CNODE_HOME}/scripts/mithril-signer.sh" ]; then
+            bash "${CNODE_HOME}/scripts/mithril-signer.sh" start >> "${LOGS_DIR}/mithril-signer.log" 2>&1
+        else
+            nohup mithril-signer \
+                --enable-metrics-server \
+                --metrics-server-ip 0.0.0.0 \
+                --metrics-server-port 9090 \
+                -vv >> "${LOGS_DIR}/mithril-signer.log" 2>&1 &
+        fi
         SIGNER_PID=$!
-    else
-        mithril-signer -vvv &
-        SIGNER_PID=$!
+        log "✅ Mithril signer started (PID: ${SIGNER_PID})"
+        log "�� Metrics: http://localhost:9090/metrics"
+        log "📝 Logs: ${LOGS_DIR}/mithril-signer.log"
+    ) &
+}
+
+# ----- Start CNCLI background processes (BP mode) -----
+start_cncli_processes() {
+    if [ "${NODE_MODE}" != "bp" ]; then
+        return
     fi
-    log "Mithril signer started (PID ${SIGNER_PID})"
+
+    if [ "${CNCLI_ENABLED}" != "Y" ] && [ "${CNCLI_ENABLED}" != "y" ]; then
+        return
+    fi
+
+    if [ ! -f "${CNODE_HOME}/scripts/cncli.sh" ]; then
+        warn "cncli.sh not found, skipping CNCLI processes"
+        return
+    fi
+
+    log "Scheduling CNCLI background processes (waits for node startup)..."
+    (
+        # Wait for cardano-node socket
+        while [ ! -S "${CARDANO_NODE_SOCKET_PATH}" ]; do
+            sleep 10
+        done
+
+        # Give node time to fully start and open EKG/Prometheus ports
+        log "  [cncli] Waiting 30s for cardano-node ports..."
+        sleep 30
+
+        mkdir -p "${GUILD_DB_DIR}"
+
+        # Backup existing cncli database
+        if [ -f "${GUILD_DB_DIR}/cncli.db" ]; then
+            log "  [cncli] Found existing cncli database - preserving"
+            cp "${GUILD_DB_DIR}/cncli.db" "${GUILD_DB_DIR}/cncli.db.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+        fi
+
+        # Start PoolTool.io sendtip/sendslots if API key is available
+        if [ -n "${PT_API_KEY}" ]; then
+            log "  [cncli] Starting PoolTool.io sendtip..."
+            "${CNODE_HOME}/scripts/cncli.sh" ptsendtip >> "${GUILD_DB_DIR}/ptsendtip.log" 2>&1 &
+            CNCLI_PIDS+=($!)
+            "${CNODE_HOME}/scripts/cncli.sh" ptsendslots >> "${GUILD_DB_DIR}/ptsendslots.log" 2>&1 &
+            CNCLI_PIDS+=($!)
+        else
+            log "  [cncli] PT_API_KEY not set - skipping PoolTool.io (get key from pooltool.io)"
+        fi
+
+        # Start core CNCLI processes
+        log "  [cncli] Starting sync, leaderlog, validate..."
+        "${CNODE_HOME}/scripts/cncli.sh" sync >> "${GUILD_DB_DIR}/sync.log" 2>&1 &
+        CNCLI_PIDS+=($!)
+        "${CNODE_HOME}/scripts/cncli.sh" leaderlog >> "${GUILD_DB_DIR}/leader.log" 2>&1 &
+        CNCLI_PIDS+=($!)
+        "${CNODE_HOME}/scripts/cncli.sh" validate >> "${GUILD_DB_DIR}/validate.log" 2>&1 &
+        CNCLI_PIDS+=($!)
+
+        log "✅ CNCLI processes started (${#CNCLI_PIDS[@]} processes)"
+    ) &
 }
 
 # ----- Build cardano-node command -----
@@ -233,14 +473,11 @@ build_node_cmd() {
     local socket_path="${CARDANO_NODE_SOCKET_PATH}"
     local host="0.0.0.0"
 
-    # Validate required files
     if [ ! -f "${config_file}" ]; then
-        err "Config file not found: ${config_file}"
-        exit 1
+        err "Config file not found: ${config_file}"; exit 1
     fi
     if [ ! -f "${topology_file}" ]; then
-        err "Topology file not found: ${topology_file}"
-        exit 1
+        err "Topology file not found: ${topology_file}"; exit 1
     fi
 
     local CMD="cardano-node +RTS ${RTS_OPTS} -RTS run"
@@ -253,27 +490,59 @@ build_node_cmd() {
 
     # BP-specific: KES keys
     if [ "${NODE_MODE}" = "bp" ]; then
-        local priv="${CNODE_HOME}/priv"
-        if [ -f "${priv}/pool/kes.skey" ] && [ -f "${priv}/pool/vrf.skey" ] && [ -f "${priv}/pool/node.cert" ]; then
-            CMD="${CMD} --shelley-kes-key ${priv}/pool/kes.skey"
-            CMD="${CMD} --shelley-vrf-key ${priv}/pool/vrf.skey"
-            CMD="${CMD} --shelley-operational-certificate ${priv}/pool/node.cert"
-            log "Block producer mode: KES keys loaded"
-        elif [ -f "${priv}/pool/hot.skey" ] && [ -f "${priv}/pool/vrf.skey" ] && [ -f "${priv}/pool/opcert.cert" ]; then
-            # Alternative naming convention
-            CMD="${CMD} --shelley-kes-key ${priv}/pool/hot.skey"
-            CMD="${CMD} --shelley-vrf-key ${priv}/pool/vrf.skey"
-            CMD="${CMD} --shelley-operational-certificate ${priv}/pool/opcert.cert"
-            log "Block producer mode: KES keys loaded (alt naming)"
+        local priv_pool=""
+        if [ -n "${POOL_DIR}" ] && [ -d "${POOL_DIR}" ]; then
+            priv_pool="${POOL_DIR}"
+        elif [ -n "${POOL_NAME}" ] && [ -d "${CNODE_HOME}/priv/pool/${POOL_NAME}" ]; then
+            priv_pool="${CNODE_HOME}/priv/pool/${POOL_NAME}"
         else
-            warn "BP mode but no KES keys found in ${priv}/pool/"
-            warn "Expected: kes.skey, vrf.skey, node.cert (or hot.skey, vrf.skey, opcert.cert)"
+            priv_pool="${CNODE_HOME}/priv/pool"
+        fi
+
+        # Try Guild naming: hot.skey, vrf.skey, op.cert
+        if [ -f "${priv_pool}/hot.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/op.cert" ]; then
+            CMD="${CMD} --shelley-kes-key ${priv_pool}/hot.skey"
+            CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
+            CMD="${CMD} --shelley-operational-certificate ${priv_pool}/op.cert"
+            log "BP mode: KES keys loaded from ${priv_pool} (Guild naming)"
+        # Try CoinCashew naming: kes.skey, vrf.skey, node.cert
+        elif [ -f "${priv_pool}/kes.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/node.cert" ]; then
+            CMD="${CMD} --shelley-kes-key ${priv_pool}/kes.skey"
+            CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
+            CMD="${CMD} --shelley-operational-certificate ${priv_pool}/node.cert"
+            log "BP mode: KES keys loaded from ${priv_pool} (CoinCashew naming)"
+        # Try alt naming: hot.skey, vrf.skey, opcert.cert
+        elif [ -f "${priv_pool}/hot.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/opcert.cert" ]; then
+            CMD="${CMD} --shelley-kes-key ${priv_pool}/hot.skey"
+            CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
+            CMD="${CMD} --shelley-operational-certificate ${priv_pool}/opcert.cert"
+            log "BP mode: KES keys loaded from ${priv_pool} (alt naming)"
+        else
+            warn "BP mode but no KES keys found in ${priv_pool}/"
+            warn "Expected one of:"
+            warn "  Guild:      hot.skey, vrf.skey, op.cert"
+            warn "  CoinCashew: kes.skey, vrf.skey, node.cert"
+            warn "  Alt:        hot.skey, vrf.skey, opcert.cert"
             warn "Starting as relay-equivalent (no block production)"
+            ls -la "${priv_pool}/" 2>/dev/null || warn "Directory does not exist: ${priv_pool}"
         fi
     fi
 
     echo "${CMD}"
 }
+
+# ----- Determine --mainnet / --testnet-magic flag for cardano-cli -----
+get_network_flag() {
+    case "${NETWORK}" in
+        mainnet) echo "--mainnet" ;;
+        preview) echo "--testnet-magic 2" ;;
+        preprod) echo "--testnet-magic 1" ;;
+        guild)   echo "--testnet-magic 141" ;;
+        *)       echo "--mainnet" ;;
+    esac
+}
+
+NETWORK_FLAG=$(get_network_flag)
 
 # ----- Subcommand handling -----
 case "${1:-}" in
@@ -295,17 +564,25 @@ case "${1:-}" in
     cli)
         exec cardano-cli "${@:2}"
         ;;
+    cncli)
+        exec bash "${CNODE_HOME}/scripts/cncli.sh" "${@:2}"
+        ;;
+    topologyUpdater|topology-updater)
+        exec bash "${CNODE_HOME}/scripts/topologyUpdater.sh" "${@:2}"
+        ;;
     version|--version|-v)
         echo "=== Hybrid-Node Version Info ==="
-        echo "cardano-node: $(cardano-node --version 2>/dev/null | head -1 || echo 'not found')"
-        echo "cardano-cli:  $(cardano-cli --version 2>/dev/null | head -1 || echo 'not found')"
+        echo "cardano-node:   $(cardano-node --version 2>/dev/null | head -1 || echo 'not found')"
+        echo "cardano-cli:    $(cardano-cli --version 2>/dev/null | head -1 || echo 'not found')"
         echo "mithril-client: $(mithril-client --version 2>/dev/null | head -1 || echo 'not found')"
         echo "mithril-signer: $(mithril-signer --version 2>/dev/null | head -1 || echo 'not found')"
-        echo "nview: $(nview --version 2>/dev/null | head -1 || echo 'not found')"
-        echo "txtop: $(txtop --version 2>/dev/null | head -1 || echo 'not found')"
-        echo "cncli: $(cncli --version 2>/dev/null | head -1 || echo 'not found')"
+        echo "nview:          $(nview --version 2>/dev/null | head -1 || echo 'not found')"
+        echo "txtop:          $(txtop --version 2>/dev/null | head -1 || echo 'not found')"
+        echo "cncli:          $(cncli --version 2>/dev/null | head -1 || echo 'not found')"
         echo "Network: ${NETWORK}"
-        echo "Mode: ${NODE_MODE}"
+        echo "Mode:    ${NODE_MODE}"
+        echo "Port:    ${NODE_PORT}"
+        echo "CPU:     ${CPU_CORES}"
         exit 0
         ;;
 esac
@@ -313,33 +590,56 @@ esac
 # ===== Main flow =====
 log "============================================"
 log "  Hybrid-Node starting"
-log "  Network: ${NETWORK}"
-log "  Mode:    ${NODE_MODE}"
-log "  Port:    ${NODE_PORT}"
+log "  Network:    ${NETWORK}"
+log "  Mode:       ${NODE_MODE}"
+log "  Port:       ${NODE_PORT}"
+log "  CPU Cores:  ${CPU_CORES}"
+log "  Socket:     ${CARDANO_NODE_SOCKET_PATH}"
+if [ "${NODE_MODE}" = "bp" ]; then
+    log "  Pool:       ${POOL_NAME:-unset}"
+    log "  Pool Dir:   ${POOL_DIR:-auto}"
+    log "  CNCLI:      ${CNCLI_ENABLED}"
+    log "  Mithril:    ${MITHRIL_SIGNER:-${MITHRIL_SIGNER_ENABLED:-N}}"
+    log "  PoolTool:   ${PT_API_KEY:+configured}${PT_API_KEY:-not set}"
+fi
 log "============================================"
 
-# Print version info
 log "cardano-node $(cardano-node --version 2>/dev/null | head -1)"
 
-# 1. Setup network configs
+# 1. Install runtime deps (e2fsprogs, sudo) if missing
+install_runtime_deps
+
+# 2. Setup network configs
 setup_network_configs
 
-# 2. Mithril bootstrap (if enabled)
+# 3. Customise configs (bind 0.0.0.0, enable chattr)
+customise_configs
+
+# 4. Configure pool info in Guild scripts (BP mode)
+configure_pool
+
+# 5. DB Backup/Restore
+handle_backup_restore
+
+# 6. Mithril bootstrap (if enabled)
 mithril_bootstrap
 
-# 3. Build node command
+# 7. Build node command
 NODE_CMD=$(build_node_cmd)
 log "Starting: ${NODE_CMD}"
 
-# 4. Launch cardano-node
+# 8. Launch cardano-node
 eval ${NODE_CMD} &
 NODE_PID=$!
 log "cardano-node started (PID ${NODE_PID})"
 
-# 5. Start mithril-signer if enabled (BP mode)
+# 9. Start CNCLI background processes (BP mode)
+start_cncli_processes
+
+# 10. Start mithril-signer if enabled (BP mode)
 start_mithril_signer
 
-# 6. Wait for node process
+# 11. Wait for node process
 wait ${NODE_PID}
 EXIT_CODE=$?
 log "cardano-node exited with code ${EXIT_CODE}"
