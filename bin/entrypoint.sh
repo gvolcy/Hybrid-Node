@@ -38,7 +38,8 @@ fi
 : "${MITHRIL_SIGNER:=N}"
 : "${UPDATE_CHECK:=N}"
 : "${CPU_CORES:=2}"
-: "${RTS_OPTS:=-N${CPU_CORES} -I0 -A16m -qg -qb --disable-delayed-os-memory-return}"
+# Always rebuild RTS_OPTS to use actual CPU_CORES (Dockerfile bakes -N2 default)
+RTS_OPTS="-N${CPU_CORES} -I0 -A16m -qg -qb --disable-delayed-os-memory-return"
 : "${ENABLE_BACKUP:=N}"
 : "${ENABLE_RESTORE:=N}"
 : "${CNCLI_ENABLED:=N}"
@@ -271,6 +272,19 @@ customise_configs() {
     # Fix hasEKG format for external access
     find "${CONFIG_DIR}" -name "*config*.json" -print0 2>/dev/null | \
         xargs -0 sed -i 's/"hasEKG": 12788,/"hasEKG": [\n    "0.0.0.0",\n    12788\n],/g' 2>/dev/null || true
+
+    # Ensure EnableP2P is set in config.json (node 10.6+ removed it from defaults
+    # but Guild Operators gLiveView/env still reads it — defaults to false if missing)
+    local main_config="${CONFIG_DIR}/config.json"
+    if [ -f "${main_config}" ]; then
+        local has_p2p
+        has_p2p=$(jq -r '.EnableP2P // empty' "${main_config}" 2>/dev/null)
+        if [ -z "${has_p2p}" ]; then
+            log "Adding EnableP2P=true to config.json (required for gLiveView P2P detection)"
+            jq '. + {"EnableP2P": true}' "${main_config}" > "${main_config}.tmp" && \
+                mv "${main_config}.tmp" "${main_config}"
+        fi
+    fi
 
     # Enable CHATTR in CNTools if available
     if [ -f "${CNODE_HOME}/scripts/cntools.sh" ]; then

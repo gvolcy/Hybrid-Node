@@ -197,7 +197,6 @@ ENV NETWORK=mainnet \
     CNCLI_ENABLED=N \
     ENABLE_BACKUP=N \
     ENABLE_RESTORE=N \
-    RTS_OPTS="-N2 -I0 -A16m -qg -qb --disable-delayed-os-memory-return" \
     EKG_HOST=0.0.0.0 \
     PROMETHEUS_HOST=0.0.0.0 \
     PROMETHEUS_PORT=12798 \
