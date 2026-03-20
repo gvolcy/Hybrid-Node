@@ -285,17 +285,18 @@ customise_configs() {
                 mv "${main_config}.tmp" "${main_config}"
         fi
 
-        # BP nodes: Switch GenesisMode → CardanoMode
+        # BP nodes: Switch GenesisMode → PraosMode
         # GenesisMode requires ≥5 big ledger peers to reach "CaughtUp" state, but a
         # locked-down BP only connects to its own relays (which aren't big ledger peers).
         # This leaves the node permanently stuck in "starting" / PreSyncing state.
-        # CardanoMode is the correct choice for BPs with restricted topology.
+        # PraosMode is the correct choice for BPs with restricted topology.
+        # (Valid values: GenesisMode, PraosMode — CardanoMode was removed in 10.x)
         if [ "${NODE_MODE}" = "bp" ]; then
             local current_mode
             current_mode=$(jq -r '.ConsensusMode // empty' "${main_config}" 2>/dev/null)
             if [ "${current_mode}" = "GenesisMode" ]; then
-                log "BP mode: Switching ConsensusMode from GenesisMode to CardanoMode"
-                jq '.ConsensusMode = "CardanoMode"' "${main_config}" > "${main_config}.tmp" && \
+                log "BP mode: Switching ConsensusMode from GenesisMode to PraosMode"
+                jq '.ConsensusMode = "PraosMode"' "${main_config}" > "${main_config}.tmp" && \
                     mv "${main_config}.tmp" "${main_config}"
             fi
         fi
