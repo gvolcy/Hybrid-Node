@@ -305,11 +305,20 @@ customise_configs() {
         # The new trace dispatcher (UseTraceDispatcher=true) outputs minimal logs
         # that gLiveView/cntools can't fully parse (missing chainDensity, utxoSize, etc.)
         # Legacy tracing provides the detailed JSON that Guild tools expect.
+        # Also requires KatipBK backends and stdout scribes to log to console.
         local trace_dispatcher
         trace_dispatcher=$(jq -r '.UseTraceDispatcher // empty' "${main_config}" 2>/dev/null)
         if [ "${trace_dispatcher}" = "true" ]; then
             log "Switching to legacy tracing (UseTraceDispatcher=false) for Guild tools compatibility"
-            jq '.UseTraceDispatcher = false' "${main_config}" > "${main_config}.tmp" && \
+            jq '
+              .UseTraceDispatcher = false |
+              .defaultScribes = [["StdoutSK","stdout"]] |
+              .setupScribes = [{"scFormat":"ScText","scKind":"StdoutSK","scName":"stdout","scRotation":null}] |
+              .setupBackends = ["KatipBK"] |
+              .defaultBackends = ["KatipBK"] |
+              .minSeverity = "Info" |
+              .options = {"mapBackends":{"cardano.node.metrics":["EKGViewBK"],"cardano.node.resources":["EKGViewBK"]},"mapSubtrace":{"cardano.node.metrics":{"subtrace":"Neutral"}}}
+            ' "${main_config}" > "${main_config}.tmp" && \
                 mv "${main_config}.tmp" "${main_config}"
         fi
     fi
