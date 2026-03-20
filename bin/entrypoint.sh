@@ -48,6 +48,12 @@ RTS_OPTS="-N${CPU_CORES} -I0 -A16m -qg -qb --disable-delayed-os-memory-return"
 : "${EKG_PORT:=12788}"
 : "${PROMETHEUS_HOST:=0.0.0.0}"
 : "${PROMETHEUS_PORT:=12798}"
+
+# Ensure EKG and Prometheus ports don't collide (they bind to separate sockets)
+if [ "${EKG_PORT}" = "${PROMETHEUS_PORT}" ]; then
+    EKG_PORT=$((PROMETHEUS_PORT + 10))
+    log "WARN: EKG_PORT collided with PROMETHEUS_PORT (${PROMETHEUS_PORT}), adjusted EKG_PORT to ${EKG_PORT}"
+fi
 : "${IP_VERSION:=4}"
 : "${CNODE_LISTEN_IP4:=0.0.0.0}"
 : "${CNODE_LISTEN_IP6:=::}"
