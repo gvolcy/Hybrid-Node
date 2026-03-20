@@ -300,6 +300,18 @@ customise_configs() {
                     mv "${main_config}.tmp" "${main_config}"
             fi
         fi
+
+        # Use legacy tracing system for Guild Operators compatibility
+        # The new trace dispatcher (UseTraceDispatcher=true) outputs minimal logs
+        # that gLiveView/cntools can't fully parse (missing chainDensity, utxoSize, etc.)
+        # Legacy tracing provides the detailed JSON that Guild tools expect.
+        local trace_dispatcher
+        trace_dispatcher=$(jq -r '.UseTraceDispatcher // empty' "${main_config}" 2>/dev/null)
+        if [ "${trace_dispatcher}" = "true" ]; then
+            log "Switching to legacy tracing (UseTraceDispatcher=false) for Guild tools compatibility"
+            jq '.UseTraceDispatcher = false' "${main_config}" > "${main_config}.tmp" && \
+                mv "${main_config}.tmp" "${main_config}"
+        fi
     fi
 
     # Enable CHATTR in CNTools if available
