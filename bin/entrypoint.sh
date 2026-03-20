@@ -303,24 +303,80 @@ customise_configs() {
 
         # Use legacy tracing system for Guild Operators compatibility
         # The new trace dispatcher (UseTraceDispatcher=true) outputs minimal logs
-        # that gLiveView/cntools can't fully parse (missing chainDensity, utxoSize, etc.)
-        # Legacy tracing provides the detailed JSON that Guild tools expect.
-        # Also requires KatipBK backends, stdout scribes, and hasPrometheus/hasEKG
-        # for metrics (gLiveView reads forging_enabled from Prometheus).
+        # that gLiveView/cntools can't fully parse (missing chainDensity, utxoSize,
+        # delegMapSize, etc.) Legacy tracing with the full set of Trace* boolean flags
+        # provides the detailed JSON traces and Prometheus metrics that Guild tools expect.
+        # We also remove new-trace-dispatcher fields (TraceOptions, TraceOptionForwarder,
+        # etc.) which conflict with legacy tracing, and add log rotation settings.
         local trace_dispatcher
-        trace_dispatcher=$(jq -r '.UseTraceDispatcher // empty' "${main_config}" 2>/dev/null)
-        if [ "${trace_dispatcher}" = "true" ]; then
-            log "Switching to legacy tracing (UseTraceDispatcher=false) for Guild tools compatibility"
+        trace_dispatcher=$(jq -r 'if .UseTraceDispatcher == true then "true" elif .UseTraceDispatcher == false then "false" else "missing" end' "${main_config}" 2>/dev/null)
+        local has_legacy_traces
+        has_legacy_traces=$(jq -r 'if has("TraceMempool") then "yes" else "no" end' "${main_config}" 2>/dev/null)
+        if [ "${trace_dispatcher}" = "true" ] || [ "${has_legacy_traces}" = "no" ]; then
+            log "Configuring full legacy tracing (UseTraceDispatcher=false) for Guild tools compatibility"
             jq '
               .UseTraceDispatcher = false |
+              del(.TraceOptions, .TraceOptionForwarder, .TraceOptionMetricsPrefix,
+                  .TraceOptionResourceFrequency, .TraceOptionNodeName) |
               .defaultScribes = [["StdoutSK","stdout"]] |
               .setupScribes = [{"scFormat":"ScText","scKind":"StdoutSK","scName":"stdout","scRotation":null}] |
               .setupBackends = ["KatipBK"] |
               .defaultBackends = ["KatipBK"] |
               .minSeverity = "Info" |
+              .TracingVerbosity = "NormalVerbosity" |
               .hasPrometheus = ["0.0.0.0", 12798] |
               .hasEKG = 12788 |
-              .options = {"mapBackends":{"cardano.node.metrics":["EKGViewBK"],"cardano.node.resources":["EKGViewBK"]},"mapSubtrace":{"cardano.node.metrics":{"subtrace":"Neutral"}}}
+              .TraceAcceptPolicy = true |
+              .TraceBlockFetchClient = false |
+              .TraceBlockFetchDecisions = true |
+              .TraceBlockFetchProtocol = false |
+              .TraceBlockFetchProtocolSerialised = false |
+              .TraceBlockFetchServer = false |
+              .TraceChainDb = true |
+              .TraceChainSyncBlockServer = false |
+              .TraceChainSyncClient = false |
+              .TraceChainSyncHeaderServer = false |
+              .TraceChainSyncProtocol = false |
+              .TraceConnectionManager = true |
+              .TraceDNSResolver = true |
+              .TraceDNSSubscription = true |
+              .TraceDiffusionInitialization = true |
+              .TraceErrorPolicy = true |
+              .TraceForge = true |
+              .TraceHandshake = true |
+              .TraceInboundGovernor = true |
+              .TraceIpSubscription = true |
+              .TraceLedgerPeers = true |
+              .TraceLocalChainSyncProtocol = false |
+              .TraceLocalConnectionManager = true |
+              .TraceLocalErrorPolicy = true |
+              .TraceLocalHandshake = true |
+              .TraceLocalRootPeers = true |
+              .TraceLocalTxSubmissionProtocol = false |
+              .TraceLocalTxSubmissionServer = false |
+              .TraceMempool = true |
+              .TraceMux = false |
+              .TracePeerSelection = true |
+              .TracePeerSelectionActions = true |
+              .TracePublicRootPeers = true |
+              .TraceServer = true |
+              .TraceTxInbound = false |
+              .TraceTxOutbound = false |
+              .TraceTxSubmissionProtocol = false |
+              .options = {
+                "mapBackends": {
+                  "cardano.node.metrics": ["EKGViewBK"],
+                  "cardano.node.resources": ["EKGViewBK"]
+                },
+                "mapSubtrace": {
+                  "cardano.node.metrics": {"subtrace":"Neutral"}
+                }
+              } |
+              .rotation = {
+                "rpKeepFilesNum": 10,
+                "rpLogLimitBytes": 5000000,
+                "rpMaxAgeHours": 24
+              }
             ' "${main_config}" > "${main_config}.tmp" && \
                 mv "${main_config}.tmp" "${main_config}"
         fi
