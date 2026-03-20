@@ -305,7 +305,8 @@ customise_configs() {
         # The new trace dispatcher (UseTraceDispatcher=true) outputs minimal logs
         # that gLiveView/cntools can't fully parse (missing chainDensity, utxoSize, etc.)
         # Legacy tracing provides the detailed JSON that Guild tools expect.
-        # Also requires KatipBK backends and stdout scribes to log to console.
+        # Also requires KatipBK backends, stdout scribes, and hasPrometheus/hasEKG
+        # for metrics (gLiveView reads forging_enabled from Prometheus).
         local trace_dispatcher
         trace_dispatcher=$(jq -r '.UseTraceDispatcher // empty' "${main_config}" 2>/dev/null)
         if [ "${trace_dispatcher}" = "true" ]; then
@@ -317,6 +318,8 @@ customise_configs() {
               .setupBackends = ["KatipBK"] |
               .defaultBackends = ["KatipBK"] |
               .minSeverity = "Info" |
+              .hasPrometheus = ["0.0.0.0", 12798] |
+              .hasEKG = 12788 |
               .options = {"mapBackends":{"cardano.node.metrics":["EKGViewBK"],"cardano.node.resources":["EKGViewBK"]},"mapSubtrace":{"cardano.node.metrics":{"subtrace":"Neutral"}}}
             ' "${main_config}" > "${main_config}.tmp" && \
                 mv "${main_config}.tmp" "${main_config}"
