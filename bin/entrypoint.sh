@@ -380,6 +380,31 @@ customise_configs() {
             ' "${main_config}" > "${main_config}.tmp" && \
                 mv "${main_config}.tmp" "${main_config}"
         fi
+
+        # Configure Guild env file with Prometheus/EKG endpoints
+        # The newer Guild env script auto-detects Prometheus from TraceOptions (new
+        # trace dispatcher format) but we use legacy tracing with hasPrometheus.
+        # Explicitly set PROM_HOST/PROM_PORT so gLiveView can find metrics.
+        local prom_host prom_port ekg_port
+        prom_host=$(jq -r '.hasPrometheus[0] // empty' "${main_config}" 2>/dev/null)
+        prom_port=$(jq -r '.hasPrometheus[1] // empty' "${main_config}" 2>/dev/null)
+        ekg_port=$(jq -r '.hasEKG // empty' "${main_config}" 2>/dev/null)
+
+        local env_file="${CNODE_HOME}/scripts/env"
+        if [ -f "${env_file}" ] && [ -n "${prom_host}" ] && [ -n "${prom_port}" ]; then
+            # Prometheus: uncomment and set, or add if not present
+            sed -i "s|^#PROM_HOST=.*|PROM_HOST=${prom_host}|" "${env_file}" 2>/dev/null || true
+            sed -i "s|^#PROM_PORT=.*|PROM_PORT=${prom_port}|" "${env_file}" 2>/dev/null || true
+            # If already uncommented, update the value
+            sed -i "s|^PROM_HOST=.*|PROM_HOST=${prom_host}|" "${env_file}" 2>/dev/null || true
+            sed -i "s|^PROM_PORT=.*|PROM_PORT=${prom_port}|" "${env_file}" 2>/dev/null || true
+            log "Set PROM_HOST=${prom_host} PROM_PORT=${prom_port} in env file"
+        fi
+        if [ -f "${env_file}" ] && [ -n "${ekg_port}" ]; then
+            sed -i "s|^#EKG_PORT=.*|EKG_PORT=${ekg_port}|" "${env_file}" 2>/dev/null || true
+            sed -i "s|^EKG_PORT=.*|EKG_PORT=${ekg_port}|" "${env_file}" 2>/dev/null || true
+            log "Set EKG_PORT=${ekg_port} in env file"
+        fi
     fi
 
     # Enable CHATTR in CNTools if available
