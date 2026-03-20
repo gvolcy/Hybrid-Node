@@ -499,18 +499,29 @@ setup_network_configs() {
         *)       err "Unknown network: ${NETWORK}"; exit 1 ;;
     esac
 
-    # Config file precedence: CLI override > hybrid-configs > existing > download
+    # Config file precedence: CLI override > hybrid-configs > network mismatch > existing > download
     if [ -n "${CONFIG}" ] && [ -f "${CONFIG}" ]; then
         log "Using custom config: ${CONFIG}"
         cp "${CONFIG}" "${CONFIG_DIR}/config.json"
     elif [ -f "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" ]; then
         log "Using hybrid config override for ${NETWORK}"
         cp "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" "${CONFIG_DIR}/config.json"
-    elif [ ! -f "${CONFIG_DIR}/config.json" ]; then
+    elif [ -f "${CONFIG_DIR}/config.json" ]; then
+        # Detect network mismatch: mainnet uses RequiresNoMagic, testnets use RequiresMagic
+        local existing_magic
+        existing_magic=$(jq -r '.RequiresNetworkMagic // empty' "${CONFIG_DIR}/config.json" 2>/dev/null)
+        local expect_magic="RequiresMagic"
+        [ "${NETWORK}" = "mainnet" ] && expect_magic="RequiresNoMagic"
+        if [ -n "${existing_magic}" ] && [ "${existing_magic}" != "${expect_magic}" ]; then
+            warn "Network mismatch! config.json has ${existing_magic} but NETWORK=${NETWORK} expects ${expect_magic}"
+            log "Re-downloading correct ${NETWORK} config.json..."
+            curl -sS -o "${CONFIG_DIR}/config.json" "${BASE_URL}/config.json"
+        else
+            log "Using existing config.json (preserving local modifications)"
+        fi
+    else
         log "Downloading ${NETWORK} config.json..."
         curl -sS -o "${CONFIG_DIR}/config.json" "${BASE_URL}/config.json"
-    else
-        log "Using existing config.json (preserving local modifications)"
     fi
 
     # Topology file precedence: CLI override > hybrid-configs > existing > download
