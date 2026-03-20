@@ -269,10 +269,6 @@ customise_configs() {
     find "${CONFIG_DIR}" -name "*config*.json" -print0 2>/dev/null | \
         xargs -0 sed -i 's/127.0.0.1/0.0.0.0/g' 2>/dev/null || true
 
-    # Fix hasEKG format for external access
-    find "${CONFIG_DIR}" -name "*config*.json" -print0 2>/dev/null | \
-        xargs -0 sed -i 's/"hasEKG": 12788,/"hasEKG": [\n    "0.0.0.0",\n    12788\n],/g' 2>/dev/null || true
-
     # Ensure EnableP2P is set in config.json (node 10.6+ removed it from defaults
     # but Guild Operators gLiveView/env still reads it — defaults to false if missing)
     local main_config="${CONFIG_DIR}/config.json"
@@ -388,7 +384,8 @@ customise_configs() {
         local prom_host prom_port ekg_port
         prom_host=$(jq -r '.hasPrometheus[0] // empty' "${main_config}" 2>/dev/null)
         prom_port=$(jq -r '.hasPrometheus[1] // empty' "${main_config}" 2>/dev/null)
-        ekg_port=$(jq -r '.hasEKG // empty' "${main_config}" 2>/dev/null)
+        # hasEKG can be integer (12788) or array (["0.0.0.0", 12788])
+        ekg_port=$(jq -r 'if (.hasEKG | type) == "number" then .hasEKG elif (.hasEKG | type) == "array" then .hasEKG[1] else empty end' "${main_config}" 2>/dev/null)
 
         local env_file="${CNODE_HOME}/scripts/env"
         if [ -f "${env_file}" ] && [ -n "${prom_host}" ] && [ -n "${prom_port}" ]; then
