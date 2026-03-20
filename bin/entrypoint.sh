@@ -45,6 +45,7 @@ RTS_OPTS="-N${CPU_CORES} -I0 -A16m -qg -qb --disable-delayed-os-memory-return"
 : "${CNCLI_ENABLED:=N}"
 : "${CARDANO_BLOCK_PRODUCER:=false}"
 : "${EKG_HOST:=0.0.0.0}"
+: "${EKG_PORT:=12788}"
 : "${PROMETHEUS_HOST:=0.0.0.0}"
 : "${PROMETHEUS_PORT:=12798}"
 : "${IP_VERSION:=4}"
@@ -310,7 +311,7 @@ customise_configs() {
         has_legacy_traces=$(jq -r 'if has("TraceMempool") then "yes" else "no" end' "${main_config}" 2>/dev/null)
         if [ "${trace_dispatcher}" = "true" ] || [ "${has_legacy_traces}" = "no" ]; then
             log "Configuring full legacy tracing (UseTraceDispatcher=false) for Guild tools compatibility"
-            jq '
+            jq --argjson prom_p "${PROMETHEUS_PORT}" --argjson ekg_p "${EKG_PORT:-12788}" '
               .UseTraceDispatcher = false |
               del(.TraceOptions, .TraceOptionForwarder, .TraceOptionMetricsPrefix,
                   .TraceOptionResourceFrequency, .TraceOptionNodeName) |
@@ -320,8 +321,8 @@ customise_configs() {
               .defaultBackends = ["KatipBK"] |
               .minSeverity = "Info" |
               .TracingVerbosity = "NormalVerbosity" |
-              .hasPrometheus = ["0.0.0.0", 12798] |
-              .hasEKG = 12788 |
+              .hasPrometheus = ["0.0.0.0", $prom_p] |
+              .hasEKG = $ekg_p |
               .TraceAcceptPolicy = true |
               .TraceBlockFetchClient = false |
               .TraceBlockFetchDecisions = true |
