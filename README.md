@@ -2,7 +2,7 @@
 
 **A hybrid Cardano node Docker image combining the best of Guild Operators and Blink Labs for Kubernetes (K3s) deployments.**
 
-[![Build and Push](https://github.com/volcyada/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/volcyada/Hybrid-Node/actions/workflows/build.yml)
+[![Build and Push](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Why Hybrid?
@@ -29,6 +29,11 @@
 - �� **CNCLI integration** — Slot leader logs, block validation, PoolTool.io reporting
 - 💾 **DB backup/restore** — Automatic db backup before start and restore on crash
 - 🏊 **Multi-pool support** — `POOL_DIR` / `POOL_NAME`-based private key directory layout
+- 🔍 **Network mismatch detection** — Auto-detects wrong network config (e.g., mainnet config on preprod) and re-downloads
+- 📈 **Legacy tracing** — Full 37-flag legacy trace config for gLiveView pool size, delegMapSize, utxoSize metrics
+- 🛡️ **Port collision guard** — Prevents EKG/Prometheus port conflicts with automatic adjustment
+- ✅ **Genesis hash verification** — Validates and auto-repairs genesis hashes on startup
+- ⚡ **Smart config preservation** — Preserves local config modifications across restarts while detecting network mismatches
 
 ## Quick Start
 
@@ -36,10 +41,10 @@
 
 ```bash
 # Latest stable
-docker pull ghcr.io/volcyada/hybrid-node:latest
+docker pull ghcr.io/gvolcy/hybrid-node:latest
 
 # Specific version
-docker pull ghcr.io/volcyada/hybrid-node:10.6.2
+docker pull ghcr.io/gvolcy/hybrid-node:10.6.2
 ```
 
 ### Run as relay
@@ -53,7 +58,7 @@ docker run -d \
   -v cardano-db:/opt/cardano/cnode/db \
   -v cardano-sockets:/opt/cardano/cnode/sockets \
   -p 3001:3001 \
-  ghcr.io/volcyada/hybrid-node:latest
+  ghcr.io/gvolcy/hybrid-node:latest
 ```
 
 ### Run as block producer
@@ -77,7 +82,7 @@ docker run -d \
   -v cardano-guild-db:/opt/cardano/cnode/guild-db \
   -v cardano-mithril:/opt/cardano/cnode/mithril \
   -p 6000:6000 \
-  ghcr.io/volcyada/hybrid-node:latest
+  ghcr.io/gvolcy/hybrid-node:latest
 ```
 
 ### K3s / Kubernetes Deployment
@@ -148,9 +153,10 @@ kubectl apply -f k3s/bp.yaml  # edit env vars first!
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EKG_HOST` | `127.0.0.1` | EKG listen address (`0.0.0.0` for K8s) |
-| `PROMETHEUS_HOST` | `127.0.0.1` | Prometheus listen address (`0.0.0.0` for K8s) |
+| `EKG_HOST` | `0.0.0.0` | EKG listen address |
+| `PROMETHEUS_HOST` | `0.0.0.0` | Prometheus listen address |
 | `PROMETHEUS_PORT` | `12798` | Prometheus metrics port |
+| `EKG_PORT` | `12788` | EKG monitoring port (auto-adjusted if it collides with PROMETHEUS_PORT) |
 
 ### Backup / Restore
 
@@ -242,7 +248,7 @@ docker build --build-arg NODE_VERSION=10.6.2 -t hybrid-node:10.6.2 .
 
 # Multi-arch build and push
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/volcyada/hybrid-node:10.6.2 \
+  -t ghcr.io/gvolcy/hybrid-node:10.6.2 \
   --push .
 ```
 
@@ -283,7 +289,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 │  └───────────────────────────────────────────────┘  │
 │                                                     │
 │  ┌───────────────────────────────────────────────┐  │
-│  │  Hybrid Entrypoint (480+ lines)               │  │
+│  │  Hybrid Entrypoint (950+ lines)               │  │
 │  │  • Auto-detects mode (bp/relay)               │  │
 │  │  • CNCLI sync/leaderlog/validate/PoolTool     │  │
 │  │  • Mithril bootstrap + signer auto-start      │  │
