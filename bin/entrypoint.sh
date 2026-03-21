@@ -527,7 +527,13 @@ setup_network_configs() {
     # Topology file precedence: CLI override > hybrid-configs > existing > download
     if [ -n "${TOPOLOGY}" ] && [ -f "${TOPOLOGY}" ]; then
         log "Using custom topology: ${TOPOLOGY}"
-        cp "${TOPOLOGY}" "${CONFIG_DIR}/topology.json"
+        # Avoid cp error when source and destination are the same file
+        local topo_real dest_real
+        topo_real=$(realpath "${TOPOLOGY}" 2>/dev/null || echo "${TOPOLOGY}")
+        dest_real=$(realpath "${CONFIG_DIR}/topology.json" 2>/dev/null || echo "${CONFIG_DIR}/topology.json")
+        if [ "${topo_real}" != "${dest_real}" ]; then
+            cp "${TOPOLOGY}" "${CONFIG_DIR}/topology.json"
+        fi
     elif [ -f "${HYBRID_CONFIG_DIR}/${NETWORK}/topology.json" ]; then
         log "Using hybrid topology override for ${NETWORK}"
         cp "${HYBRID_CONFIG_DIR}/${NETWORK}/topology.json" "${CONFIG_DIR}/topology.json"
@@ -544,6 +550,15 @@ setup_network_configs() {
                 warn "Could not download ${genesis} (may not exist for this network)"
         fi
     done
+
+    # Download checkpoints.json if referenced by config (10.6+ for mainnet/preview)
+    if jq -e '.CheckpointsFile' "${CONFIG_DIR}/config.json" >/dev/null 2>&1; then
+        local ckpt_file
+        ckpt_file=$(jq -r '.CheckpointsFile' "${CONFIG_DIR}/config.json")
+        log "Downloading ${ckpt_file} for ${NETWORK}..."
+        curl -sS -o "${CONFIG_DIR}/${ckpt_file}" "${BASE_URL}/${ckpt_file}" 2>/dev/null || \
+            warn "Could not download ${ckpt_file} (may not exist for this network)"
+    fi
 
     # Add custom peers to topology if specified
     if [ -n "${CUSTOM_PEERS}" ]; then
