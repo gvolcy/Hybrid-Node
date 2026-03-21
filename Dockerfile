@@ -1,7 +1,7 @@
 # ============================================================================
 # Hybrid-Node Dockerfile
 # Combines Blink Labs source-built binaries with Guild Operators tooling
-# https://github.com/volcyada/Hybrid-Node
+# https://github.com/gvolcy/Hybrid-Node
 # ============================================================================
 
 # ----- Build Arguments -----
@@ -91,10 +91,10 @@ RUN ARCH="${TARGETARCH}" && \
 # ============================================================================
 FROM debian:bookworm-slim AS final
 
-LABEL maintainer="VolcyAda <https://github.com/volcyada>"
+LABEL maintainer="VolcyAda <https://github.com/gvolcy>"
 LABEL org.opencontainers.image.title="Hybrid-Node"
 LABEL org.opencontainers.image.description="Hybrid Cardano node: Blink Labs source build + Guild Operators tooling"
-LABEL org.opencontainers.image.source="https://github.com/volcyada/Hybrid-Node"
+LABEL org.opencontainers.image.source="https://github.com/gvolcy/Hybrid-Node"
 LABEL org.opencontainers.image.licenses="MIT"
 
 ENV CNODE_HOME=/opt/cardano/cnode

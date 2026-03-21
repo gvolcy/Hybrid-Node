@@ -930,7 +930,7 @@ if [ "${NODE_MODE}" = "bp" ]; then
     log "  Pool:       ${POOL_NAME:-unset}"
     log "  Pool Dir:   ${POOL_DIR:-auto}"
     log "  CNCLI:      ${CNCLI_ENABLED}"
-    log "  Mithril:    ${MITHRIL_SIGNER:-${MITHRIL_SIGNER_ENABLED:-N}}"
+    log "  Mithril:    ${MITHRIL_SIGNER}"
     log "  PoolTool:   ${PT_API_KEY:+configured}${PT_API_KEY:-not set}"
 fi
 if [ -n "${MEMPOOL_OVERRIDE}" ]; then

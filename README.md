@@ -149,7 +149,7 @@ kubectl apply -f k3s/bp.yaml  # edit env vars first!
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MITHRIL_DOWNLOAD` | `N` | Set to `Y` to bootstrap DB via mithril-client on first start |
-| `MITHRIL_SIGNER` | `N` | Set to `Y` to start mithril-signer alongside node (BP mode) |
+| `MITHRIL_SIGNER` | `N` | Set to `Y` to start mithril-signer alongside node (BP mode). `MITHRIL_SIGNER_ENABLED=Y` is also accepted as an alias. |
 
 ### Monitoring
 
