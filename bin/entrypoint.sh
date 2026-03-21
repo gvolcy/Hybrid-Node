@@ -686,18 +686,39 @@ start_mithril_signer() {
 
         export CARDANO_NODE_SOCKET_PATH="${CARDANO_NODE_SOCKET_PATH}"
 
-        if [ -x "${CNODE_HOME}/scripts/mithril-signer.sh" ]; then
-            bash "${CNODE_HOME}/scripts/mithril-signer.sh" start >> "${LOGS_DIR}/mithril-signer.log" 2>&1
+        # Fix cardano_cli_path in config.toml if it points to a non-existent path
+        local cli_real
+        cli_real=$(command -v cardano-cli 2>/dev/null || echo "/usr/local/bin/cardano-cli")
+        local mithril_cfg_dir="${MITHRIL_DIR}/config"
+        if [ -f "${mithril_cfg_dir}/config.toml" ]; then
+            sed -i "s|^cardano_cli_path = .*|cardano_cli_path = \"${cli_real}\"|" "${mithril_cfg_dir}/config.toml"
+            log "  [mithril] Updated cardano_cli_path → ${cli_real}"
+        fi
+
+        # Determine metrics settings from mithril.env (default 9090)
+        local m_ip="${METRICS_SERVER_IP:-0.0.0.0}"
+        local m_port="${METRICS_SERVER_PORT:-9090}"
+
+        # Always start mithril-signer directly (skip guild-ops mithril-signer.sh
+        # which needs its own env setup that may not exist in the container)
+        if [ -d "${mithril_cfg_dir}" ]; then
+            log "  [mithril] Using config dir: ${mithril_cfg_dir}"
+            nohup mithril-signer \
+                -c "${mithril_cfg_dir}" \
+                --enable-metrics-server \
+                --metrics-server-ip "${m_ip}" \
+                --metrics-server-port "${m_port}" \
+                -vv >> "${LOGS_DIR}/mithril-signer.log" 2>&1 &
         else
             nohup mithril-signer \
                 --enable-metrics-server \
-                --metrics-server-ip 0.0.0.0 \
-                --metrics-server-port 9090 \
+                --metrics-server-ip "${m_ip}" \
+                --metrics-server-port "${m_port}" \
                 -vv >> "${LOGS_DIR}/mithril-signer.log" 2>&1 &
         fi
         SIGNER_PID=$!
         log "✅ Mithril signer started (PID: ${SIGNER_PID})"
-        log "�� Metrics: http://localhost:9090/metrics"
+        log "📊 Metrics: http://localhost:${m_port}/metrics"
         log "📝 Logs: ${LOGS_DIR}/mithril-signer.log"
     ) &
 }
