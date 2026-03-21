@@ -5,6 +5,8 @@
 [![Build and Push](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> 🟢 **Production-validated** — Running on mainnet across 5 nodes (2 block producers + 3 relays) for VOLCY and SILEM stake pools.
+
 ## Why Hybrid?
 
 | Source | What We Take | Why |
@@ -331,4 +333,4 @@ MIT License — See [LICENSE](LICENSE) for details.
 
 ---
 
-*Built with ❤️ by [VolcyAda](https://github.com/volcyada) — Operators of VOLCY and SILEM stake pools on Cardano mainnet.*
+*Built with ❤️ by [VolcyAda](https://github.com/gvolcy) — Operators of VOLCY and SILEM stake pools on Cardano mainnet.*

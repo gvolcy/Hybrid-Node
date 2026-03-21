@@ -10,9 +10,9 @@ keywords:
   - stakepool
   - k3s
   - kubernetes
-home: https://github.com/volcyada/Hybrid-Node
+home: https://github.com/gvolcy/Hybrid-Node
 sources:
-  - https://github.com/volcyada/Hybrid-Node
+  - https://github.com/gvolcy/Hybrid-Node
 maintainers:
-  - name: volcyada
-    url: https://github.com/volcyada
+  - name: gvolcy
+    url: https://github.com/gvolcy

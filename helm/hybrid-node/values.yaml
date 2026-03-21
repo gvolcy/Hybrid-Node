@@ -2,11 +2,12 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/volcyada/hybrid-node
+  repository: ghcr.io/gvolcy/hybrid-node
   pullPolicy: IfNotPresent
   tag: "latest"
 
-imagePullSecrets: []
+imagePullSecrets:
+  - name: ghcr-creds
 nameOverride: ""
 fullnameOverride: ""
 

@@ -36,6 +36,8 @@ spec:
         network: mainnet
     spec:
       hostname: cardano-relay
+      imagePullSecrets:
+        - name: ghcr-creds
       terminationGracePeriodSeconds: 300
       securityContext:
         runAsUser: 1000
@@ -47,7 +49,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: cardano-node
-          image: ghcr.io/volcyada/hybrid-node:latest
+          image: ghcr.io/gvolcy/hybrid-node:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: NETWORK
@@ -64,6 +66,8 @@ spec:
               value: "0.0.0.0"
             - name: PROMETHEUS_PORT
               value: "12798"
+            - name: CPU_CORES
+              value: "4"
           ports:
             - containerPort: 3001
               hostPort: 3001
