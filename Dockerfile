@@ -159,6 +159,21 @@ RUN SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y CNODE_HOME=${CNODE_HOME} \
     mv /root/.local/bin /home/guild/.local/ 2>/dev/null || true && \
     chown -R guild:guild /home/guild/
 
+# Patch CNTools for cardano-node 10.6+ pool-state field name changes
+# (upstream guild-operators uses old field names: pledge/margin/cost/metadata/relays/owners/rewardAccount
+#  but 10.6+ pool-state returns: spsPledge/spsMargin/spsCost/spsMetadata/spsRelays/spsOwners/spsRewardAccount)
+RUN sed -i \
+    -e "s/'.pledge \/\/0'/'.spsPledge \/\/ .pledge \/\/0'/g" \
+    -e "s/'.margin \/\/0'/'.spsMargin \/\/ .margin \/\/0'/g" \
+    -e "s/'.cost \/\/0'/'.spsCost \/\/ .cost \/\/0'/g" \
+    -e "s/'.metadata.url \/\/empty'/'.spsMetadata.url \/\/ .metadata.url \/\/empty'/g" \
+    -e "s/'.metadata.hash \/\/empty'/'.spsMetadata.hash \/\/ .metadata.hash \/\/empty'/g" \
+    -e "s/'.relays\[\] \/\/empty'/'.spsRelays[] \/\/ .relays[] \/\/empty'/g" \
+    -e "s/'.owners\[\] \/\/ empty'/'.spsOwners[] \/\/ .owners[] \/\/ empty'/g" \
+    -e "s/.rewardAccount.credential/.spsRewardAccount.credential \/\/ .rewardAccount.credential/g" \
+    ${CNODE_HOME}/scripts/cntools.sh && \
+    echo "CNTools patched for 10.6+ pool-state field names"
+
 # Download configs for all supported networks
 RUN bash -c 'networks=(guild mainnet preprod preview); \
     files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json); \
