@@ -93,16 +93,22 @@ spec:
                       sleep 1
                     done
                     echo "Timeout waiting for clean shutdown"
+          startupProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            failureThreshold: 2880    # 24 hours grace for initial sync
           livenessProbe:
-            tcpSocket:
-              port: cardano
-            initialDelaySeconds: 14400
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 20
           readinessProbe:
             tcpSocket:
               port: cardano
-            initialDelaySeconds: 1200
+            initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 10
           resources:
@@ -167,3 +173,94 @@ spec:
       name: prometheus
   selector:
     app: cardano-relay
+---
+# ============================================================================
+# Selfheal CronJob: restarts relay if node stops responding
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cardano-relay-selfheal
+  namespace: cardano-relay
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cardano-relay-selfheal
+  namespace: cardano-relay
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cardano-relay-selfheal
+  namespace: cardano-relay
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cardano-relay-selfheal
+subjects:
+  - kind: ServiceAccount
+    name: cardano-relay-selfheal
+    namespace: cardano-relay
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cardano-relay-selfheal
+  namespace: cardano-relay
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: cardano-relay-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: selfheal
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="cardano-relay"
+                  NS="cardano-relay"
+                  MIN_AGE=86400
+                  PROM_PORT=12798
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "No pod found, restarting deployment"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                    exit 0
+                  fi
+                  START=$(kubectl get pod -n $NS $POD -o jsonpath='{.status.startTime}' 2>/dev/null)
+                  if [ -n "$START" ]; then
+                    START_EPOCH=$(date -d "$START" +%s 2>/dev/null)
+                    NOW_EPOCH=$(date +%s)
+                    AGE=$(( NOW_EPOCH - START_EPOCH ))
+                    if [ "$AGE" -lt "$MIN_AGE" ]; then
+                      echo "Pod age ${AGE}s < MIN_AGE ${MIN_AGE}s, skipping (may still be syncing)"
+                      exit 0
+                    fi
+                  fi
+                  SYNC=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_density_real' | awk '{print $2}')
+                  if [ -z "$SYNC" ] || [ "$SYNC" == "0" ]; then
+                    echo "Node not responding or stuck (density=${SYNC:-null}), age=${AGE}s, restarting"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                  else
+                    echo "Node healthy: density=$SYNC age=${AGE}s"
+                  fi

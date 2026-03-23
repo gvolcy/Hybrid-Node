@@ -155,16 +155,22 @@ spec:
                       sleep 1
                     done
                     echo "Timeout waiting for clean shutdown"
+          startupProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            failureThreshold: 2880    # 24 hours grace for initial sync
           livenessProbe:
-            tcpSocket:
-              port: 6000
-            initialDelaySeconds: 14400
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 20
           readinessProbe:
             tcpSocket:
               port: 6000
-            initialDelaySeconds: 1200
+            initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 10
           resources:
@@ -332,3 +338,221 @@ spec:
                     kubectl exec -n cardano-bp "$POD" -- bash /opt/cardano/cnode/scripts/mithril-signer.sh start
                   fi
                   echo "Mithril signer started in $POD"
+---
+# ============================================================================
+# Selfheal CronJob: restarts BP if node stops responding
+# Uses the same ServiceAccount as mithril-keeper (needs pods/exec)
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cardano-bp-selfheal
+  namespace: cardano-bp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cardano-bp-selfheal
+  namespace: cardano-bp
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cardano-bp-selfheal
+  namespace: cardano-bp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cardano-bp-selfheal
+subjects:
+  - kind: ServiceAccount
+    name: cardano-bp-selfheal
+    namespace: cardano-bp
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cardano-bp-selfheal
+  namespace: cardano-bp
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: cardano-bp-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: selfheal
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="cardano-bp"
+                  NS="cardano-bp"
+                  MIN_AGE=86400
+                  PROM_PORT=12798
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "No pod found, restarting deployment"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                    exit 0
+                  fi
+                  START=$(kubectl get pod -n $NS $POD -o jsonpath='{.status.startTime}' 2>/dev/null)
+                  if [ -n "$START" ]; then
+                    START_EPOCH=$(date -d "$START" +%s 2>/dev/null)
+                    NOW_EPOCH=$(date +%s)
+                    AGE=$(( NOW_EPOCH - START_EPOCH ))
+                    if [ "$AGE" -lt "$MIN_AGE" ]; then
+                      echo "Pod age ${AGE}s < MIN_AGE ${MIN_AGE}s, skipping (may still be syncing)"
+                      exit 0
+                    fi
+                  fi
+                  SYNC=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_density_real' | awk '{print $2}')
+                  if [ -z "$SYNC" ] || [ "$SYNC" == "0" ]; then
+                    echo "Node not responding or stuck (density=${SYNC:-null}), age=${AGE}s, restarting"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                  else
+                    echo "Node healthy: density=$SYNC age=${AGE}s"
+                  fi
+---
+# ============================================================================
+# KES Expiry Monitor: warns when KES key is close to expiring (BP only)
+# Runs daily, exits 1 if remaining periods <= threshold
+# ============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cardano-bp-kes-monitor
+  namespace: cardano-bp
+spec:
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: cardano-bp-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: kes-monitor
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="cardano-bp"
+                  NS="cardano-bp"
+                  PROM_PORT=12798
+                  KES_WARN_THRESHOLD=10
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "ERROR: No running BP pod found!"
+                    exit 1
+                  fi
+                  REMAINING=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_remainingKESPeriods_int' | awk '{print $2}')
+                  CURRENT=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_currentKESPeriod_int' | awk '{print $2}')
+                  EXPIRY=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_operationalCertificateExpiryKESPeriod_int' | awk '{print $2}')
+                  DAYS_LEFT=$(( REMAINING * 129600 / 86400 ))
+                  echo "=== KES Status: $DEPLOY ==="
+                  echo "Current KES Period: $CURRENT"
+                  echo "Expiry KES Period:  $EXPIRY"
+                  echo "Remaining Periods:  $REMAINING"
+                  echo "Approx Days Left:   $DAYS_LEFT"
+                  echo "=========================="
+                  if [ -z "$REMAINING" ]; then
+                    echo "CRITICAL: Could not read KES metrics!"
+                    exit 1
+                  fi
+                  if [ "$REMAINING" -le "$KES_WARN_THRESHOLD" ]; then
+                    echo "WARNING: KES key expires in $REMAINING periods (~${DAYS_LEFT} days)! ROTATE NOW!"
+                    exit 1
+                  fi
+                  echo "OK: KES key healthy with $REMAINING periods (~${DAYS_LEFT} days) remaining"
+---
+# ============================================================================
+# DB Snapshot: weekly backup of the Cardano DB (BP only)
+# Tars the DB directory and stores on host, keeps last 2 snapshots
+# ============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cardano-bp-db-snapshot
+  namespace: cardano-bp
+spec:
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 7200
+      template:
+        spec:
+          serviceAccountName: cardano-bp-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: db-snapshot
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="cardano-bp"
+                  NS="cardano-bp"
+                  SNAPSHOT_DIR="/snapshots"
+                  MAX_SNAPSHOTS=2
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+                  echo "=== DB Snapshot: $DEPLOY @ $TIMESTAMP ==="
+
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "ERROR: No running BP pod found!"
+                    exit 1
+                  fi
+
+                  DB_SIZE=$(kubectl exec -n $NS $POD -- du -sh /opt/cardano/cnode/db 2>/dev/null | awk '{print $1}')
+                  echo "Current DB size: $DB_SIZE"
+
+                  echo "Creating snapshot..."
+                  kubectl exec -n $NS $POD -- tar czf - /opt/cardano/cnode/db 2>/dev/null > ${SNAPSHOT_DIR}/db-${DEPLOY}-${TIMESTAMP}.tar.gz
+
+                  if [ $? -eq 0 ]; then
+                    SNAP_SIZE=$(du -sh ${SNAPSHOT_DIR}/db-${DEPLOY}-${TIMESTAMP}.tar.gz | awk '{print $1}')
+                    echo "Snapshot created: db-${DEPLOY}-${TIMESTAMP}.tar.gz ($SNAP_SIZE)"
+                  else
+                    echo "ERROR: Snapshot failed!"
+                    exit 1
+                  fi
+
+                  cd ${SNAPSHOT_DIR}
+                  ls -t db-${DEPLOY}-*.tar.gz 2>/dev/null | tail -n +$((MAX_SNAPSHOTS + 1)) | xargs -r rm -v
+                  echo "Snapshot complete. Remaining snapshots:"
+                  ls -lh ${SNAPSHOT_DIR}/db-${DEPLOY}-*.tar.gz 2>/dev/null
+              volumeMounts:
+                - mountPath: /snapshots
+                  name: snapshots
+          volumes:
+            - name: snapshots
+              hostPath:
+                path: /snapshots
+                type: DirectoryOrCreate
