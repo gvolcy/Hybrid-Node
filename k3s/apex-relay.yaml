@@ -1,0 +1,266 @@
+# ============================================================================
+# Hybrid-Node ApexFusion Relay for K3s
+# Features: preStop graceful shutdown, all persistent volumes,
+#           disk-pressure toleration, socket-based probes
+# ============================================================================
+# Usage:
+#   1. Create namespace:  kubectl create ns apex-relay
+#   2. Edit env vars below (NODE_PORT, NETWORK, etc.)
+#   3. kubectl apply -f apex-relay.yaml
+# ============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apex-relay
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-relay
+  namespace: apex-relay
+  labels:
+    app: apex-relay
+    network: mainnet
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: apex-relay
+  template:
+    metadata:
+      labels:
+        app: apex-relay
+        network: mainnet
+    spec:
+      hostname: apex-relay
+      imagePullSecrets:
+        - name: ghcr-creds
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: apex-node
+          image: ghcr.io/gvolcy/hybrid-node:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "afpm"
+            - name: NODE_MODE
+              value: "relay"
+            - name: NODE_PORT
+              value: "3001"
+            - name: CNODE_PORT
+              value: "3001"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
+            - name: CPU_CORES
+              value: "4"
+          ports:
+            - containerPort: 3001
+              hostPort: 4550
+              name: apex
+              protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+            - containerPort: 12788
+              name: ekg
+              protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    killall -s SIGINT cardano-node 2>/dev/null || true
+                    echo "Sent SIGINT, waiting for clean shutdown..."
+                    for i in $(seq 1 280); do
+                      [ -f /opt/cardano/cnode/db/clean ] && echo "Clean shutdown confirmed" && exit 0
+                      sleep 1
+                    done
+                    echo "Timeout waiting for clean shutdown"
+          startupProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            failureThreshold: 2880    # 24 hours grace for initial sync
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 20
+          readinessProbe:
+            tcpSocket:
+              port: cardano
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "2"
+              memory: "12Gi"
+            limits:
+              cpu: "4"
+              memory: "20Gi"
+          volumeMounts:
+            - mountPath: /opt/cardano/cnode/db
+              name: db
+            - mountPath: /opt/cardano/cnode/priv
+              name: priv
+            - mountPath: /opt/cardano/cnode/logs
+              name: logs
+            - mountPath: /opt/cardano/cnode/sockets
+              name: sockets
+            - mountPath: /opt/cardano/cnode/guild-db
+              name: guild-db
+            - mountPath: /opt/cardano/cnode/files
+              name: files
+      volumes:
+        - name: db
+          hostPath:
+            path: /data/apex/relay/db
+            type: DirectoryOrCreate
+        - name: priv
+          hostPath:
+            path: /data/apex/relay/priv
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/apex/relay/logs
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /data/apex/relay/sockets
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: /data/apex/relay/guild-db
+            type: DirectoryOrCreate
+        - name: files
+          hostPath:
+            path: /data/apex/relay/files
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apex-relay-service
+  namespace: apex-relay
+spec:
+  type: NodePort
+  ports:
+    - port: 3001
+      targetPort: 3001
+      name: apex
+    - port: 12798
+      targetPort: 12798
+      name: prometheus
+  selector:
+    app: apex-relay
+---
+# ============================================================================
+# Selfheal CronJob: restarts relay if node stops responding
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apex-relay-selfheal
+  namespace: apex-relay
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: apex-relay-selfheal
+  namespace: apex-relay
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: apex-relay-selfheal
+  namespace: apex-relay
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: apex-relay-selfheal
+subjects:
+  - kind: ServiceAccount
+    name: apex-relay-selfheal
+    namespace: apex-relay
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: apex-relay-selfheal
+  namespace: apex-relay
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: apex-relay-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: selfheal
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="apex-relay"
+                  NS="apex-relay"
+                  MIN_AGE=86400
+                  PROM_PORT=12798
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "No pod found, restarting deployment"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                    exit 0
+                  fi
+                  START=$(kubectl get pod -n $NS $POD -o jsonpath='{.status.startTime}' 2>/dev/null)
+                  if [ -n "$START" ]; then
+                    START_EPOCH=$(date -d "$START" +%s 2>/dev/null)
+                    NOW_EPOCH=$(date +%s)
+                    AGE=$(( NOW_EPOCH - START_EPOCH ))
+                    if [ "$AGE" -lt "$MIN_AGE" ]; then
+                      echo "Pod age ${AGE}s < MIN_AGE ${MIN_AGE}s, skipping (may still be syncing)"
+                      exit 0
+                    fi
+                  fi
+                  SYNC=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_density_real' | awk '{print $2}')
+                  if [ -z "$SYNC" ] || [ "$SYNC" == "0" ]; then
+                    echo "Node not responding or stuck (density=${SYNC:-null}), age=${AGE}s, restarting"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                  else
+                    echo "Node healthy: density=$SYNC age=${AGE}s"
+                  fi

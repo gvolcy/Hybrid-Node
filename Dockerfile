@@ -93,7 +93,7 @@ FROM debian:bookworm-slim AS final
 
 LABEL maintainer="VolcyAda <https://github.com/gvolcy>"
 LABEL org.opencontainers.image.title="Hybrid-Node"
-LABEL org.opencontainers.image.description="Hybrid Cardano node: Blink Labs source build + Guild Operators tooling"
+LABEL org.opencontainers.image.description="Hybrid Cardano/ApexFusion node: Blink Labs source build + Guild Operators tooling"
 LABEL org.opencontainers.image.source="https://github.com/gvolcy/Hybrid-Node"
 LABEL org.opencontainers.image.licenses="MIT"
 
@@ -174,7 +174,7 @@ RUN sed -i \
     ${CNODE_HOME}/scripts/cntools.sh && \
     echo "CNTools patched for 10.6+ pool-state field names"
 
-# Download configs for all supported networks
+# Download configs for all supported Cardano networks
 RUN bash -c 'networks=(guild mainnet preprod preview); \
     files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json); \
     for network in "${networks[@]}"; do \
@@ -182,6 +182,21 @@ RUN bash -c 'networks=(guild mainnet preprod preview); \
         for file in "${files[@]}"; do \
             curl -s -o ${CNODE_HOME}/files/${network}/${file} \
               https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
+        done; \
+    done' && chown -R guild:guild /opt/cardano
+
+# Download configs for ApexFusion Vector networks (afpm=mainnet, afpt=testnet)
+# ApexFusion uses the same cardano-node binary but with its own genesis/topology
+# Source: Scitz0/guild-operators-apex (official APEX fork of Guild Operators)
+ARG APEX_G_ACCOUNT=Scitz0
+ARG APEX_GUILD_BRANCH=main
+RUN bash -c 'networks=(afpm afpt); \
+    files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json db-sync-config.json); \
+    for network in "${networks[@]}"; do \
+        mkdir -pv ${CNODE_HOME}/files/${network} && \
+        for file in "${files[@]}"; do \
+            curl -s -o ${CNODE_HOME}/files/${network}/${file} \
+              https://raw.githubusercontent.com/'${APEX_G_ACCOUNT}'/guild-operators-apex/'${APEX_GUILD_BRANCH}'/files/configs/${network}/${file} 2>/dev/null || true; \
         done; \
     done' && chown -R guild:guild /opt/cardano
 

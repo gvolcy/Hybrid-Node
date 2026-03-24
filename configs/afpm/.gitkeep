@@ -1,0 +1,3 @@
+# ApexFusion Prime Mainnet (Vector chain) config overrides
+# Place custom config.json, topology.json here to override defaults
+# Default configs are fetched from Scitz0/guild-operators-apex at runtime

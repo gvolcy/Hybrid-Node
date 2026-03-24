@@ -1,0 +1,558 @@
+# ============================================================================
+# Hybrid-Node ApexFusion Block Producer for K3s
+# Features: preStop graceful shutdown, NetworkPolicy, mithril-keeper, CNCLI,
+#           PoolTool.io, all persistent volumes, disk-pressure toleration
+# ============================================================================
+# Usage:
+#   1. Create namespace:  kubectl create ns my-apex-bp
+#   2. Create KES secret: kubectl -n my-apex-bp create secret generic bp-kes-keys \
+#        --from-file=hot.skey --from-file=vrf.skey --from-file=op.cert
+#   3. Edit env vars below (POOL_NAME, POOL_ID, PT_API_KEY, etc.)
+#   4. kubectl apply -f bp.yaml
+# ============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apex-bp
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apex-bp
+  namespace: apex-bp
+---
+# RBAC for mithril-keeper CronJob
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apex-bp-mithril-keeper
+  namespace: apex-bp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: apex-bp-mithril-keeper
+  namespace: apex-bp
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: apex-bp-mithril-keeper
+  namespace: apex-bp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: apex-bp-mithril-keeper
+subjects:
+  - kind: ServiceAccount
+    name: apex-bp-mithril-keeper
+    namespace: apex-bp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-bp
+  namespace: apex-bp
+  labels:
+    app: apex-bp
+    network: mainnet
+    pool: CHANGE_ME
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: apex-bp
+  template:
+    metadata:
+      labels:
+        app: apex-bp
+        network: mainnet
+        pool: CHANGE_ME
+    spec:
+      serviceAccountName: apex-bp
+      hostname: apex-bp
+      imagePullSecrets:
+        - name: ghcr-creds
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: apex-node
+          image: ghcr.io/gvolcy/hybrid-node:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "afpm"
+            - name: NODE_MODE
+              value: "bp"
+            - name: NODE_PORT
+              value: "6000"
+            - name: CNODE_PORT
+              value: "6000"
+            - name: CPU_CORES
+              value: "4"
+            - name: POOL_NAME
+              value: "CHANGE_ME"
+            - name: POOL_ID
+              value: "CHANGE_ME"
+            - name: POOL_TICKER
+              value: "CHANGE_ME"
+            - name: PT_API_KEY
+              value: ""
+            - name: CARDANO_BLOCK_PRODUCER
+              value: "true"
+            - name: MITHRIL_SIGNER
+              value: "N"
+            - name: CNCLI_ENABLED
+              value: "Y"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
+          ports:
+            - containerPort: 6000
+              hostPort: 8784
+              name: apex
+              protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+            - containerPort: 12788
+              name: ekg
+              protocol: TCP
+            - containerPort: 9090
+              name: mithril
+              protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    killall -s SIGINT cardano-node 2>/dev/null || true
+                    echo "Sent SIGINT, waiting for clean shutdown..."
+                    for i in $(seq 1 280); do
+                      [ -f /opt/cardano/cnode/db/clean ] && echo "Clean shutdown confirmed" && exit 0
+                      sleep 1
+                    done
+                    echo "Timeout waiting for clean shutdown"
+          startupProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            failureThreshold: 2880    # 24 hours grace for initial sync
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 20
+          readinessProbe:
+            tcpSocket:
+              port: 6000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "4"
+              memory: "16Gi"
+            limits:
+              cpu: "8"
+              memory: "24Gi"
+          volumeMounts:
+            - mountPath: /opt/cardano/cnode/db
+              name: db
+            - mountPath: /opt/cardano/cnode/priv
+              name: priv
+            - mountPath: /opt/cardano/cnode/mithril
+              name: mithril
+            - mountPath: /opt/cardano/cnode/scripts
+              name: scripts
+            - mountPath: /opt/cardano/cnode/logs
+              name: logs
+            - mountPath: /opt/cardano/cnode/sockets
+              name: sockets
+            - mountPath: /opt/cardano/cnode/guild-db
+              name: guild-db
+            - mountPath: /opt/cardano/cnode/files
+              name: files
+      volumes:
+        - name: db
+          hostPath:
+            path: /data/apex/bp/db
+            type: DirectoryOrCreate
+        - name: priv
+          hostPath:
+            path: /data/apex/bp/priv
+            type: Directory
+        - name: mithril
+          hostPath:
+            path: /data/apex/bp/mithril
+            type: DirectoryOrCreate
+        - name: scripts
+          hostPath:
+            path: /data/apex/bp/scripts
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/apex/bp/logs
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /data/apex/bp/sockets
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: /data/apex/bp/guild-db
+            type: DirectoryOrCreate
+        - name: files
+          hostPath:
+            path: /data/apex/bp/files
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apex-bp-service
+  namespace: apex-bp
+spec:
+  type: NodePort
+  ports:
+    - port: 6000
+      targetPort: 6000
+      name: apex
+    - port: 12798
+      targetPort: 12798
+      name: prometheus
+    - port: 9090
+      targetPort: 9090
+      name: mithril
+  selector:
+    app: apex-bp
+---
+# NetworkPolicy: only allow relay IPs to connect to BP
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bp-relay-only
+  namespace: apex-bp
+spec:
+  podSelector:
+    matchLabels:
+      app: apex-bp
+  policyTypes:
+    - Ingress
+  ingress:
+    # CHANGE THESE to your relay public IPs
+    - from:
+        - ipBlock:
+            cidr: 1.2.3.4/32  # relay1 IP
+      ports:
+        - port: 6000
+          protocol: TCP
+    - from:
+        - ipBlock:
+            cidr: 5.6.7.8/32  # relay2 IP
+      ports:
+        - port: 6000
+          protocol: TCP
+    # Allow K3s cluster-internal traffic
+    - from:
+        - ipBlock:
+            cidr: 10.42.0.0/16
+    - from:
+        - ipBlock:
+            cidr: 10.43.0.0/16
+    - from:
+        - ipBlock:
+            cidr: 127.0.0.0/8
+---
+# Mithril-keeper: restarts mithril-signer if it crashes
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: apex-bp-mithril-keeper
+  namespace: apex-bp
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          serviceAccountName: apex-bp-mithril-keeper
+          restartPolicy: Never
+          containers:
+            - name: mithril-keeper
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  POD=$(kubectl get pods -n apex-bp -l app=apex-bp -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [[ -z "$POD" ]]; then
+                    echo "No pod found for apex-bp"
+                    exit 0
+                  fi
+
+                  RUNNING=$(kubectl exec -n apex-bp "$POD" -- bash -c 'ps -eo pid,stat,args | grep -v " Z " | grep -v grep | grep "mithril-signer" | wc -l' 2>/dev/null || echo "0")
+                  if [[ "$RUNNING" -gt 0 ]]; then
+                    echo "Mithril signer already running in $POD"
+                    exit 0
+                  fi
+
+                  if ! kubectl exec -n apex-bp "$POD" -- test -S /opt/cardano/cnode/sockets/node.socket; then
+                    echo "Node socket not ready yet in $POD"
+                    exit 0
+                  fi
+
+                  echo "Starting mithril signer in $POD..."
+                  if kubectl exec -n apex-bp "$POD" -- test -f /opt/cardano/cnode/mithril/autostart.sh; then
+                    kubectl exec -n apex-bp "$POD" -- bash /opt/cardano/cnode/mithril/autostart.sh start
+                  elif kubectl exec -n apex-bp "$POD" -- test -x /opt/cardano/cnode/scripts/mithril-signer.sh; then
+                    kubectl exec -n apex-bp "$POD" -- bash /opt/cardano/cnode/scripts/mithril-signer.sh start
+                  fi
+                  echo "Mithril signer started in $POD"
+---
+# ============================================================================
+# Selfheal CronJob: restarts BP if node stops responding
+# Uses the same ServiceAccount as mithril-keeper (needs pods/exec)
+# ============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: apex-bp-selfheal
+  namespace: apex-bp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: apex-bp-selfheal
+  namespace: apex-bp
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: apex-bp-selfheal
+  namespace: apex-bp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: apex-bp-selfheal
+subjects:
+  - kind: ServiceAccount
+    name: apex-bp-selfheal
+    namespace: apex-bp
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: apex-bp-selfheal
+  namespace: apex-bp
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: apex-bp-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: selfheal
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="apex-bp"
+                  NS="apex-bp"
+                  MIN_AGE=86400
+                  PROM_PORT=12798
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "No pod found, restarting deployment"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                    exit 0
+                  fi
+                  START=$(kubectl get pod -n $NS $POD -o jsonpath='{.status.startTime}' 2>/dev/null)
+                  if [ -n "$START" ]; then
+                    START_EPOCH=$(date -d "$START" +%s 2>/dev/null)
+                    NOW_EPOCH=$(date +%s)
+                    AGE=$(( NOW_EPOCH - START_EPOCH ))
+                    if [ "$AGE" -lt "$MIN_AGE" ]; then
+                      echo "Pod age ${AGE}s < MIN_AGE ${MIN_AGE}s, skipping (may still be syncing)"
+                      exit 0
+                    fi
+                  fi
+                  SYNC=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_density_real' | awk '{print $2}')
+                  if [ -z "$SYNC" ] || [ "$SYNC" == "0" ]; then
+                    echo "Node not responding or stuck (density=${SYNC:-null}), age=${AGE}s, restarting"
+                    kubectl rollout restart deployment/$DEPLOY -n $NS
+                  else
+                    echo "Node healthy: density=$SYNC age=${AGE}s"
+                  fi
+---
+# ============================================================================
+# KES Expiry Monitor: warns when KES key is close to expiring (BP only)
+# Runs daily, exits 1 if remaining periods <= threshold
+# ============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: apex-bp-kes-monitor
+  namespace: apex-bp
+spec:
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: apex-bp-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: kes-monitor
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="apex-bp"
+                  NS="apex-bp"
+                  PROM_PORT=12798
+                  KES_WARN_THRESHOLD=10
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "ERROR: No running BP pod found!"
+                    exit 1
+                  fi
+                  REMAINING=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_remainingKESPeriods_int' | awk '{print $2}')
+                  CURRENT=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_currentKESPeriod_int' | awk '{print $2}')
+                  EXPIRY=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_operationalCertificateExpiryKESPeriod_int' | awk '{print $2}')
+                  DAYS_LEFT=$(( REMAINING * 129600 / 86400 ))
+                  echo "=== KES Status: $DEPLOY ==="
+                  echo "Current KES Period: $CURRENT"
+                  echo "Expiry KES Period:  $EXPIRY"
+                  echo "Remaining Periods:  $REMAINING"
+                  echo "Approx Days Left:   $DAYS_LEFT"
+                  echo "=========================="
+                  if [ -z "$REMAINING" ]; then
+                    echo "CRITICAL: Could not read KES metrics!"
+                    exit 1
+                  fi
+                  if [ "$REMAINING" -le "$KES_WARN_THRESHOLD" ]; then
+                    echo "WARNING: KES key expires in $REMAINING periods (~${DAYS_LEFT} days)! ROTATE NOW!"
+                    exit 1
+                  fi
+                  echo "OK: KES key healthy with $REMAINING periods (~${DAYS_LEFT} days) remaining"
+---
+# ============================================================================
+# DB Snapshot: weekly backup of the Cardano DB (BP only)
+# Tars the DB directory and stores on host, keeps last 2 snapshots
+# ============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: apex-bp-db-snapshot
+  namespace: apex-bp
+spec:
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 7200
+      template:
+        spec:
+          serviceAccountName: apex-bp-selfheal
+          restartPolicy: OnFailure
+          containers:
+            - name: db-snapshot
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="apex-bp"
+                  NS="apex-bp"
+                  SNAPSHOT_DIR="/snapshots"
+                  MAX_SNAPSHOTS=2
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+                  echo "=== DB Snapshot: $DEPLOY @ $TIMESTAMP ==="
+
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "ERROR: No running BP pod found!"
+                    exit 1
+                  fi
+
+                  DB_SIZE=$(kubectl exec -n $NS $POD -- du -sh /opt/cardano/cnode/db 2>/dev/null | awk '{print $1}')
+                  echo "Current DB size: $DB_SIZE"
+
+                  echo "Creating snapshot..."
+                  kubectl exec -n $NS $POD -- tar czf - /opt/cardano/cnode/db 2>/dev/null > ${SNAPSHOT_DIR}/db-${DEPLOY}-${TIMESTAMP}.tar.gz
+
+                  if [ $? -eq 0 ]; then
+                    SNAP_SIZE=$(du -sh ${SNAPSHOT_DIR}/db-${DEPLOY}-${TIMESTAMP}.tar.gz | awk '{print $1}')
+                    echo "Snapshot created: db-${DEPLOY}-${TIMESTAMP}.tar.gz ($SNAP_SIZE)"
+                  else
+                    echo "ERROR: Snapshot failed!"
+                    exit 1
+                  fi
+
+                  cd ${SNAPSHOT_DIR}
+                  ls -t db-${DEPLOY}-*.tar.gz 2>/dev/null | tail -n +$((MAX_SNAPSHOTS + 1)) | xargs -r rm -v
+                  echo "Snapshot complete. Remaining snapshots:"
+                  ls -lh ${SNAPSHOT_DIR}/db-${DEPLOY}-*.tar.gz 2>/dev/null
+              volumeMounts:
+                - mountPath: /snapshots
+                  name: snapshots
+          volumes:
+            - name: snapshots
+              hostPath:
+                path: /snapshots
+                type: DirectoryOrCreate

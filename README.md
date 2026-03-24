@@ -1,11 +1,11 @@
 # 🔀 Hybrid-Node
 
-**A hybrid Cardano node Docker image combining the best of Guild Operators and Blink Labs for Kubernetes (K3s) deployments.**
+**A hybrid Cardano & ApexFusion node Docker image combining the best of Guild Operators and Blink Labs for Kubernetes (K3s) deployments.**
 
 [![Build and Push](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> 🟢 **Production-validated** — Running on mainnet across 5 nodes (2 block producers + 3 relays) for VOLCY and SILEM stake pools.
+> 🟢 **Production-validated** — Running on Cardano mainnet across 5 nodes (2 block producers + 3 relays) for VOLCY and SILEM stake pools, and on ApexFusion Vector (AFPM/AFPT) networks.
 
 ## Why Hybrid?
 
@@ -15,6 +15,7 @@
 | **[Blink Labs](https://github.com/blinklabs-io/docker-cardano-node)** | Source-built `cardano-node`, `cardano-cli`, nview, txtop, mithril-client | Fast release cadence, multi-arch, from-source builds |
 | **[CoinCashew](https://www.coincashew.com/coins/overview-ada/guide-how-to-build-a-haskell-stakepool-node)** | Best practices for BP/relay topology, KES rotation, security hardening | Industry-standard SPO guide |
 | **[Cardano Developers](https://developers.cardano.org/docs/get-started/networks/overview/)** | Official network configs (mainnet, preview, preprod) | Canonical source for genesis files |
+| **[ApexFusion / Scitz0](https://github.com/Scitz0/guild-operators-apex)** | AFPM/AFPT genesis files, topology, network configs | Official Guild Operators fork adapted for ApexFusion Vector chain |
 
 ## Features
 
@@ -22,7 +23,7 @@
 - 🛠️ **Guild Operators tooling** — CNTools, gLiveView, topology updater, mithril scripts
 - 📊 **Monitoring tools** — nview, txtop, EKG, Prometheus metrics
 - 🔐 **Mithril ready** — Both mithril-client (fast sync) and mithril-signer (signing) with auto-restart keeper
-- 🌐 **Multi-network** — Mainnet, Preview, Preprod, Guild configs included
+- 🌐 **Multi-network** — Cardano (Mainnet, Preview, Preprod, Guild) and ApexFusion (AFPM mainnet, AFPT testnet) configs included
 - ☸️ **K3s native** — Designed for Kubernetes with proper SIGINT handling, preStop hooks, graceful 280s shutdown
 - 🏷️ **Multi-arch** — AMD64 and ARM64 support
 - 🎯 **Two profiles** — `bp` (block producer) and `relay` modes
@@ -114,13 +115,53 @@ kubectl apply -f k3s/relay.yaml
 kubectl apply -f k3s/bp.yaml  # edit env vars first!
 ```
 
+
+### ApexFusion (Vector Chain)
+
+ApexFusion Vector uses the **same `cardano-node` binary** (from IntersectMBO) with different genesis files. Hybrid-Node supports both AFPM (mainnet) and AFPT (testnet).
+
+```bash
+# Run as ApexFusion relay
+docker run -d \
+  --name apex-relay \
+  -e NETWORK=afpm \
+  -e NODE_MODE=relay \
+  -e NODE_PORT=4550 \
+  -v apex-db:/opt/cardano/cnode/db \
+  -v apex-sockets:/opt/cardano/cnode/sockets \
+  -p 4550:4550 \
+  ghcr.io/gvolcy/hybrid-node:latest
+
+# Run as ApexFusion block producer
+docker run -d \
+  --name apex-bp \
+  -e NETWORK=afpm \
+  -e NODE_MODE=bp \
+  -e NODE_PORT=8784 \
+  -e POOL_NAME=MYPOOL \
+  -e POOL_ID=abc123... \
+  -e POOL_TICKER=MYTK \
+  -e CNCLI_ENABLED=Y \
+  -e MITHRIL_SIGNER=N \
+  -v apex-db:/opt/cardano/cnode/db \
+  -v apex-keys:/opt/cardano/cnode/priv \
+  -v apex-sockets:/opt/cardano/cnode/sockets \
+  -p 8784:8784 \
+  ghcr.io/gvolcy/hybrid-node:latest
+
+# K3s deployment
+kubectl apply -f k3s/apex-relay.yaml
+kubectl apply -f k3s/apex-bp.yaml  # edit env vars first!
+```
+
+> **Note:** Mithril is not available on ApexFusion networks. Set `MITHRIL_SIGNER=N` and `MITHRIL_DOWNLOAD=N`.
 ## Environment Variables
 
 ### Core
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NETWORK` | `mainnet` | Network: `mainnet`, `preview`, `preprod`, `guild` |
+| `NETWORK` | `mainnet` | Network: `mainnet`, `preview`, `preprod`, `guild`, `afpm` (ApexFusion mainnet), `afpt` (ApexFusion testnet) |
 | `NODE_MODE` | `relay` | Node mode: `relay` or `bp` |
 | `NODE_PORT` | `6000` | cardano-node port |
 | `CNODE_PORT` | `6000` | Same as NODE_PORT (for Guild script compatibility) |
@@ -203,6 +244,8 @@ For non-Helm K3s deployments, see:
 
 - `k3s/bp.yaml` — Block producer with NetworkPolicy, mithril-keeper CronJob, full RBAC
 - `k3s/relay.yaml` — Relay with proper shutdown, all volumes
+- `k3s/apex-bp.yaml` — ApexFusion block producer (AFPM by default, change NETWORK to `afpt` for testnet)
+- `k3s/apex-relay.yaml` — ApexFusion relay (AFPM by default)
 
 Edit the `CHANGE_ME` placeholders before applying.
 
@@ -287,7 +330,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 │  │  • topologyUpdater                            │  │
 │  │  • cncli                                      │  │
 │  │  • mithril-signer.sh, mithril-relay.sh        │  │
-│  │  • Network configs                            │  │
+│  │  • Network configs (Cardano + ApexFusion)     │  │
 │  └───────────────────────────────────────────────┘  │
 │                                                     │
 │  ┌───────────────────────────────────────────────┐  │
@@ -326,6 +369,7 @@ This prevents DB corruption that requires hours of replay.
 - **[CoinCashew](https://www.coincashew.com/coins/overview-ada/guide-how-to-build-a-haskell-stakepool-node)** — SPO guides
 - **[Cardano Developer Portal](https://developers.cardano.org/)** — Official network configs
 - **[Intersect MBO](https://github.com/intersectmbo/cardano-node)** — The cardano-node source
+- **[ApexFusion](https://apexfusion.org/)** — Vector chain (AFPM/AFPT) network configs via [Scitz0/guild-operators-apex](https://github.com/Scitz0/guild-operators-apex)
 
 ## License
 

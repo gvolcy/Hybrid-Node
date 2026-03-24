@@ -489,14 +489,24 @@ handle_backup_restore() {
 setup_network_configs() {
     log "Setting up network configs for: ${NETWORK}"
 
+    # Determine config source URL based on network
+    # Cardano networks: official IOG/cardano-playground configs
+    # ApexFusion networks: Scitz0/guild-operators-apex configs (same cardano-node binary, different genesis)
     local BASE_URL=""
+    local IS_APEX=false
     case "${NETWORK}" in
         mainnet) BASE_URL="https://book.play.dev.cardano.org/environments/mainnet" ;;
         preview) BASE_URL="https://book.play.dev.cardano.org/environments/preview" ;;
         preprod) BASE_URL="https://book.play.dev.cardano.org/environments/preprod" ;;
         guild)   BASE_URL="https://book.play.dev.cardano.org/environments/sanchonet"
                  warn "Guild network uses sanchonet configs" ;;
-        *)       err "Unknown network: ${NETWORK}"; exit 1 ;;
+        afpm)    BASE_URL="https://raw.githubusercontent.com/Scitz0/guild-operators-apex/main/files/configs/afpm"
+                 IS_APEX=true
+                 log "ApexFusion Prime Mainnet (Vector chain)" ;;
+        afpt)    BASE_URL="https://raw.githubusercontent.com/Scitz0/guild-operators-apex/main/files/configs/afpt"
+                 IS_APEX=true
+                 log "ApexFusion Prime Testnet (Vector chain)" ;;
+        *)       err "Unknown network: ${NETWORK}. Supported: mainnet, preview, preprod, guild, afpm, afpt"; exit 1 ;;
     esac
 
     # Config file precedence: CLI override > hybrid-configs > network mismatch > existing > download
@@ -507,11 +517,12 @@ setup_network_configs() {
         log "Using hybrid config override for ${NETWORK}"
         cp "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" "${CONFIG_DIR}/config.json"
     elif [ -f "${CONFIG_DIR}/config.json" ]; then
-        # Detect network mismatch: mainnet uses RequiresNoMagic, testnets use RequiresMagic
+        # Detect network mismatch: mainnet/afpm uses RequiresNoMagic, testnets use RequiresMagic
         local existing_magic
         existing_magic=$(jq -r '.RequiresNetworkMagic // empty' "${CONFIG_DIR}/config.json" 2>/dev/null)
         local expect_magic="RequiresMagic"
         [ "${NETWORK}" = "mainnet" ] && expect_magic="RequiresNoMagic"
+        [ "${NETWORK}" = "afpm" ] && expect_magic="RequiresNoMagic"
         if [ -n "${existing_magic}" ] && [ "${existing_magic}" != "${expect_magic}" ]; then
             warn "Network mismatch! config.json has ${existing_magic} but NETWORK=${NETWORK} expects ${expect_magic}"
             log "Re-downloading correct ${NETWORK} config.json..."
@@ -550,6 +561,14 @@ setup_network_configs() {
                 warn "Could not download ${genesis} (may not exist for this network)"
         fi
     done
+
+    # APEX networks also use a genesis.json (byron-genesis alias used by some tools)
+    if [ "${IS_APEX}" = true ]; then
+        if [ -f "${CONFIG_DIR}/byron-genesis.json" ] && [ ! -f "${CONFIG_DIR}/genesis.json" ]; then
+            cp "${CONFIG_DIR}/byron-genesis.json" "${CONFIG_DIR}/genesis.json"
+            log "Created genesis.json symlink from byron-genesis.json (APEX compatibility)"
+        fi
+    fi
 
     # Download checkpoints.json if referenced by config (10.6+ for mainnet/preview)
     if jq -e '.CheckpointsFile' "${CONFIG_DIR}/config.json" >/dev/null 2>&1; then
@@ -617,6 +636,7 @@ mithril_bootstrap() {
         mainnet) MITHRIL_AGGREGATOR="https://aggregator.release-mainnet.api.mithril.network/aggregator" ;;
         preview) MITHRIL_AGGREGATOR="https://aggregator.testing-preview.api.mithril.network/aggregator" ;;
         preprod) MITHRIL_AGGREGATOR="https://aggregator.release-preprod.api.mithril.network/aggregator" ;;
+        afpm|afpt) log "Mithril not available for ApexFusion networks, skipping"; return ;;
         *)       warn "No Mithril aggregator for network ${NETWORK}"; return ;;
     esac
 
@@ -865,9 +885,11 @@ build_node_cmd() {
 get_network_flag() {
     case "${NETWORK}" in
         mainnet) echo "--mainnet" ;;
+        afpm)    echo "--mainnet" ;;
         preview) echo "--testnet-magic 2" ;;
         preprod) echo "--testnet-magic 1" ;;
         guild)   echo "--testnet-magic 141" ;;
+        afpt)    echo "--testnet-magic 3311" ;;
         *)       echo "--mainnet" ;;
     esac
 }
