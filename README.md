@@ -303,6 +303,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 |-----------|---------|--------|
 | cardano-node | 10.6.2 | Blink Labs (source-built) |
 | cardano-cli | 10.15.0.0 | Blink Labs (source-built) |
+| cardano-cli (APEX) | 9.4.1.0 | IntersectMBO pre-built (auto-activated for afpm/afpt) |
 | mithril-client | 0.12.38 | Blink Labs |
 | mithril-signer | 0.3.7 | Blink Labs |
 | nview | 0.13.0 | Blink Labs |

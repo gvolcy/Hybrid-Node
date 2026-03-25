@@ -200,6 +200,17 @@ RUN bash -c 'networks=(afpm afpt); \
         done; \
     done' && chown -R guild:guild /opt/cardano
 
+# Download cardano-cli 9.4.1.0 for ApexFusion compatibility
+# APEX tooling requires CLI 9.4.1.0; the entrypoint swaps it in for afpm/afpt
+ARG APEX_CLI_VERSION=9.4.1.0
+RUN ARCH=$(uname -m | sed 's/aarch64/aarch64/;s/x86_64/x86_64/') && \
+    curl -sL "https://github.com/IntersectMBO/cardano-cli/releases/download/cardano-cli-${APEX_CLI_VERSION}/cardano-cli-${APEX_CLI_VERSION}-${ARCH}-linux.tar.gz" \
+      | tar xz -C /tmp && \
+    mv /tmp/cardano-cli-${ARCH}-linux /usr/local/bin/cardano-cli-apex && \
+    chmod +x /usr/local/bin/cardano-cli-apex && \
+    rm -rf /tmp/cardano-cli-* && \
+    echo "Installed cardano-cli-apex (${APEX_CLI_VERSION}) alongside default CLI"
+
 # Download additional mithril guild scripts
 RUN for script in mithril-client.sh mithril-signer.sh mithril-relay.sh; do \
       curl -sS -o ${CNODE_HOME}/scripts/${script} \

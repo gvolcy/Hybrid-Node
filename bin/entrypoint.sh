@@ -968,6 +968,16 @@ install_runtime_deps
 # 2. Setup network configs
 setup_network_configs
 
+# 2a. Swap cardano-cli for APEX networks (requires CLI 9.4.1.0)
+if [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; then
+    if [ -x /usr/local/bin/cardano-cli-apex ]; then
+        log "ApexFusion: activating cardano-cli-apex (9.4.1.0) as default CLI"
+        ln -sf /usr/local/bin/cardano-cli-apex /usr/local/bin/cardano-cli
+    else
+        warn "cardano-cli-apex not found — APEX tooling may not work correctly"
+    fi
+fi
+
 # 3. Customise configs (bind 0.0.0.0, enable chattr)
 customise_configs
 
