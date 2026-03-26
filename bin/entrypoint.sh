@@ -985,6 +985,18 @@ if [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; then
         # so Guild scripts pass validation, while the user PATH keeps 9.4.1.0.
         if [ -f "/opt/cardano/cnode/scripts/env" ]; then
             sed -i 's|^#\?CCLI=.*|CCLI="/usr/local/bin/cardano-cli"|' "/opt/cardano/cnode/scripts/env"
+            # AFPM shares networkMagic 764824073 with Cardano mainnet, so Guild
+            # scripts default SHELLEY_TRANS_EPOCH to 208 (Cardano) instead of 2
+            # (APEX). Pre-set it in env so the case-statement won't override it.
+            # Also override NETWORK_NAME for clarity in gLiveView header.
+            if [ "${NETWORK}" = "afpm" ]; then
+                sed -i 's|^#\?SHELLEY_TRANS_EPOCH=.*|SHELLEY_TRANS_EPOCH=2|' "/opt/cardano/cnode/scripts/env"
+                sed -i 's|^#\?NETWORK_NAME=.*|NETWORK_NAME="APEX Mainnet"|' "/opt/cardano/cnode/scripts/env"
+                log "ApexFusion: SHELLEY_TRANS_EPOCH=2, NETWORK_NAME=APEX Mainnet"
+            elif [ "${NETWORK}" = "afpt" ]; then
+                sed -i 's|^#\?NETWORK_NAME=.*|NETWORK_NAME="APEX Testnet"|' "/opt/cardano/cnode/scripts/env"
+                log "ApexFusion: NETWORK_NAME=APEX Testnet"
+            fi
         fi
         log "cardano-cli -> $(cardano-cli --version 2>/dev/null | head -1)"
         log "Guild CCLI  -> $(/usr/local/bin/cardano-cli --version 2>/dev/null | head -1)"
