@@ -1,41 +1,46 @@
 # ============================================================================
-# Hybrid-Node ApexFusion Relay for K3s
-# Features: preStop graceful shutdown, all persistent volumes,
-#           disk-pressure toleration, socket-based probes
+# Hybrid-Node ApexFusion Mainnet (AFPM) Relay for K3s
+# Features: preStop graceful shutdown, socket-based probes, selfheal CronJob,
+#           disk-pressure toleration, all persistent volumes
+# Deploy: main3 (apexR1), main4 (apexR2), main5 (apexR3)
 # ============================================================================
 # Usage:
-#   1. Create namespace:  kubectl create ns apex-relay
-#   2. Edit env vars below (NODE_PORT, NETWORK, etc.)
-#   3. kubectl apply -f apex-relay.yaml
+#   1. Edit POOL_NAME + hostPath base + hostPort per relay instance
+#   2. kubectl apply -f apex-relay.yaml
+#
+# Per-relay customization:
+#   apexR1 (main3): hostPort=4550, POOL_NAME=apexR1, paths=.../apexR1/
+#   apexR2 (main4): hostPort=4551, POOL_NAME=apexR2, paths=.../apexR2/
+#   apexR3 (main5): hostPort=4552, POOL_NAME=apexR3, paths=.../apexR3/
 # ============================================================================
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: apex-relay
+  name: relay-apexfusion-1
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: apex-relay
-  namespace: apex-relay
+  name: apexr1-apexfusion-node
+  namespace: relay-apexfusion-1
   labels:
-    app: apex-relay
-    network: mainnet
+    app: apexr1-apexfusion-node
+    network: afpm
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: apex-relay
+      app: apexr1-apexfusion-node
   template:
     metadata:
       labels:
-        app: apex-relay
-        network: mainnet
+        app: apexr1-apexfusion-node
+        network: afpm
     spec:
-      hostname: apex-relay
+      hostname: apexr1
       imagePullSecrets:
         - name: ghcr-creds
       terminationGracePeriodSeconds: 300
@@ -48,7 +53,7 @@ spec:
           operator: Exists
           effect: NoSchedule
       containers:
-        - name: apex-node
+        - name: cardano-node
           image: ghcr.io/gvolcy/hybrid-node:latest
           imagePullPolicy: IfNotPresent
           env:
@@ -57,21 +62,25 @@ spec:
             - name: NODE_MODE
               value: "relay"
             - name: NODE_PORT
-              value: "3001"
+              value: "4550"
             - name: CNODE_PORT
-              value: "3001"
+              value: "4550"
+            - name: POOL_NAME
+              value: "apexR1"
+            - name: UPDATE_CHECK
+              value: "N"
+            - name: CPU_CORES
+              value: "2"
             - name: EKG_HOST
               value: "0.0.0.0"
             - name: PROMETHEUS_HOST
               value: "0.0.0.0"
             - name: PROMETHEUS_PORT
               value: "12798"
-            - name: CPU_CORES
-              value: "4"
           ports:
-            - containerPort: 3001
+            - containerPort: 4550
               hostPort: 4550
-              name: apex
+              name: node
               protocol: TCP
             - containerPort: 12798
               name: prometheus
@@ -107,17 +116,17 @@ spec:
             failureThreshold: 20
           readinessProbe:
             tcpSocket:
-              port: cardano
+              port: node
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 10
           resources:
             requests:
-              cpu: "2"
-              memory: "12Gi"
+              cpu: 500m
+              memory: 1Gi
             limits:
               cpu: "4"
-              memory: "20Gi"
+              memory: 4Gi
           volumeMounts:
             - mountPath: /opt/cardano/cnode/db
               name: db
@@ -134,45 +143,45 @@ spec:
       volumes:
         - name: db
           hostPath:
-            path: /data/apex/relay/db
+            path: /home/main2/blockchain-nodes/apexfusion/afpm-relay/apexR1/db
             type: DirectoryOrCreate
         - name: priv
           hostPath:
-            path: /data/apex/relay/priv
+            path: /home/main2/blockchain-nodes/apexfusion/afpm-relay/apexR1/priv
             type: DirectoryOrCreate
         - name: logs
           hostPath:
-            path: /data/apex/relay/logs
+            path: /home/main2/blockchain-nodes/apexfusion/afpm-relay/apexR1/logs
             type: DirectoryOrCreate
         - name: sockets
           hostPath:
-            path: /data/apex/relay/sockets
+            path: /home/main2/blockchain-nodes/apexfusion/afpm-relay/apexR1/sockets
             type: DirectoryOrCreate
         - name: guild-db
           hostPath:
-            path: /data/apex/relay/guild-db
+            path: /home/main2/blockchain-nodes/apexfusion/afpm-relay/apexR1/guild-db
             type: DirectoryOrCreate
         - name: files
           hostPath:
-            path: /data/apex/relay/files
+            path: /home/main2/blockchain-nodes/apexfusion/afpm-relay/apexR1/files
             type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: apex-relay-service
-  namespace: apex-relay
+  name: apexr1-apexfusion-service
+  namespace: relay-apexfusion-1
 spec:
   type: NodePort
   ports:
-    - port: 3001
-      targetPort: 3001
-      name: apex
+    - port: 4550
+      targetPort: 4550
+      name: node
     - port: 12798
       targetPort: 12798
       name: prometheus
   selector:
-    app: apex-relay
+    app: apexr1-apexfusion-node
 ---
 # ============================================================================
 # Selfheal CronJob: restarts relay if node stops responding
@@ -180,14 +189,14 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: apex-relay-selfheal
-  namespace: apex-relay
+  name: apexr1-selfheal
+  namespace: relay-apexfusion-1
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: apex-relay-selfheal
-  namespace: apex-relay
+  name: apexr1-selfheal
+  namespace: relay-apexfusion-1
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -202,22 +211,22 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: apex-relay-selfheal
-  namespace: apex-relay
+  name: apexr1-selfheal
+  namespace: relay-apexfusion-1
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: apex-relay-selfheal
+  name: apexr1-selfheal
 subjects:
   - kind: ServiceAccount
-    name: apex-relay-selfheal
-    namespace: apex-relay
+    name: apexr1-selfheal
+    namespace: relay-apexfusion-1
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: apex-relay-selfheal
-  namespace: apex-relay
+  name: apexr1-selfheal
+  namespace: relay-apexfusion-1
 spec:
   schedule: "*/5 * * * *"
   concurrencyPolicy: Forbid
@@ -228,7 +237,7 @@ spec:
       activeDeadlineSeconds: 120
       template:
         spec:
-          serviceAccountName: apex-relay-selfheal
+          serviceAccountName: apexr1-selfheal
           restartPolicy: OnFailure
           containers:
             - name: selfheal
@@ -237,8 +246,8 @@ spec:
                 - /bin/bash
                 - -c
                 - |
-                  DEPLOY="apex-relay"
-                  NS="apex-relay"
+                  DEPLOY="apexr1-apexfusion-node"
+                  NS="relay-apexfusion-1"
                   MIN_AGE=86400
                   PROM_PORT=12798
                   POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
