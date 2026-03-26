@@ -975,9 +975,11 @@ if [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; then
         mkdir -p /home/guild/.local/bin
         ln -sf /usr/local/bin/cardano-cli-apex /home/guild/.local/bin/cardano-cli
         export PATH="/home/guild/.local/bin:${PATH}"
-        # Persist for interactive shells (kubectl exec)
-        grep -q '/.local/bin' /home/guild/.bashrc 2>/dev/null || \
-            echo 'export PATH="/home/guild/.local/bin:${PATH}"' >> /home/guild/.bashrc
+        # Persist for ALL shell modes including non-interactive (kubectl exec -- bash -c)
+        # Must be BEFORE the interactive guard in .bashrc (case $- in *i*)...)
+        if ! grep -q '/.local/bin' /home/guild/.bashrc 2>/dev/null; then
+            sed -i '1i export PATH="/home/guild/.local/bin:${PATH}"' /home/guild/.bashrc
+        fi
         log "cardano-cli -> $(cardano-cli --version 2>/dev/null | head -1)"
     else
         warn "cardano-cli-apex not found — APEX tooling may not work correctly"
