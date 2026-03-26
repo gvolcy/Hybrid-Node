@@ -972,7 +972,10 @@ setup_network_configs
 if [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; then
     if [ -x /usr/local/bin/cardano-cli-apex ]; then
         log "ApexFusion: activating cardano-cli-apex (9.4.1.0) as default CLI"
-        ln -sf /usr/local/bin/cardano-cli-apex /usr/local/bin/cardano-cli
+        mkdir -p /home/guild/.local/bin
+        ln -sf /usr/local/bin/cardano-cli-apex /home/guild/.local/bin/cardano-cli
+        export PATH="/home/guild/.local/bin:${PATH}"
+        log "cardano-cli -> $(cardano-cli --version 2>/dev/null | head -1)"
     else
         warn "cardano-cli-apex not found — APEX tooling may not work correctly"
     fi

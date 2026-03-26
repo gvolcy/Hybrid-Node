@@ -1,0 +1,152 @@
+# ============================================================================
+# Hybrid-Node ApexFusion Testnet Relay for K3s
+# Replaces the old afpt-cardano-node:10.1.4 custom image with Hybrid-Node
+# Deploy: main3 (apexT1), main4 (apexT2), main5 (apexT3)
+# ============================================================================
+# Usage:
+#   1. Edit POOL_NAME + hostPath base + hostPort per relay instance
+#   2. kubectl apply -f apex-testnet-relay.yaml
+#
+# Per-relay customization:
+#   apexT1 (main3): hostPort=3535, POOL_NAME=apexT1, paths=.../apexT1/
+#   apexT2 (main4): hostPort=3536, POOL_NAME=apexT2, paths=.../apexT2/
+#   apexT3 (main5): hostPort=3537, POOL_NAME=apexT3, paths=.../apexT3/
+# ============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: relay-apexfusion-testnet
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apext1-apexfusion-node
+  namespace: relay-apexfusion-testnet
+  labels:
+    app: apext1-apexfusion-node
+    network: afpt
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: apext1-apexfusion-node
+  template:
+    metadata:
+      labels:
+        app: apext1-apexfusion-node
+        network: afpt
+    spec:
+      hostname: apext1
+      imagePullSecrets:
+        - name: ghcr-creds
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: cardano-node
+          image: ghcr.io/gvolcy/hybrid-node:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "afpt"
+            - name: NODE_MODE
+              value: "relay"
+            - name: NODE_PORT
+              value: "3535"
+            - name: CNODE_PORT
+              value: "3535"
+            - name: POOL_NAME
+              value: "apexT1"
+            - name: UPDATE_CHECK
+              value: "N"
+            - name: CPU_CORES
+              value: "2"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
+          ports:
+            - containerPort: 3535
+              hostPort: 3535
+              name: node
+              protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+            - containerPort: 12788
+              name: ekg
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          livenessProbe:
+            tcpSocket:
+              port: 3535
+            initialDelaySeconds: 1800
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket:
+              port: 3535
+            initialDelaySeconds: 1200
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    echo "Graceful shutdown initiated..."
+                    PID=$(pgrep -f cardano-node || true)
+                    if [ -n "$PID" ]; then
+                      kill -SIGINT $PID
+                      for i in $(seq 1 240); do
+                        kill -0 $PID 2>/dev/null || break
+                        sleep 1
+                      done
+                    fi
+          volumeMounts:
+            - name: db
+              mountPath: /opt/cardano/cnode/db
+            - name: logs
+              mountPath: /opt/cardano/cnode/logs
+            - name: sockets
+              mountPath: /opt/cardano/cnode/sockets
+            - name: guild-db
+              mountPath: /opt/cardano/cnode/guild-db
+      volumes:
+        - name: db
+          hostPath:
+            path: /home/main2/blockchain-nodes/apexfusion/afpt-relay/apexT1/db
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /home/main2/blockchain-nodes/apexfusion/afpt-relay/apexT1/logs
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /home/main2/blockchain-nodes/apexfusion/afpt-relay/apexT1/sockets
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: /home/main2/blockchain-nodes/apexfusion/afpt-relay/apexT1/guild-db
+            type: DirectoryOrCreate
