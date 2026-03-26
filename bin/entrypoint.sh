@@ -983,9 +983,8 @@ if [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; then
         # Guild tools (gLiveView, cntools, etc.) require CLI >= 10.11.x.x for
         # version checks and query commands. Point CCLI at the node-bundled CLI
         # so Guild scripts pass validation, while the user PATH keeps 9.4.1.0.
-        local env_file="/opt/cardano/cnode/scripts/env"
-        if [ -f "${env_file}" ]; then
-            sed -i 's|^#\?CCLI=.*|CCLI="/usr/local/bin/cardano-cli"|' "${env_file}"
+        if [ -f "/opt/cardano/cnode/scripts/env" ]; then
+            sed -i 's|^#\?CCLI=.*|CCLI="/usr/local/bin/cardano-cli"|' "/opt/cardano/cnode/scripts/env"
         fi
         log "cardano-cli -> $(cardano-cli --version 2>/dev/null | head -1)"
         log "Guild CCLI  -> $(/usr/local/bin/cardano-cli --version 2>/dev/null | head -1)"
