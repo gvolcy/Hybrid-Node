@@ -5,13 +5,13 @@
 # ============================================================================
 
 # ----- Build Arguments -----
-ARG NODE_VERSION=10.6.2
+ARG NODE_VERSION=10.1.4
 ARG GHC_VERSION=9.6.6
 ARG CABAL_VERSION=3.12.1.0
 ARG HASKELL_IMAGE_TAG=9.6.6-3.12.1.0-3
 
 # ============================================================================
-# Stage 1: Build cardano-node and cardano-cli from source (Blink Labs approach)
+# Stage 1: Build cardano-node from source (Blink Labs approach)
 # ============================================================================
 FROM ghcr.io/blinklabs-io/haskell:${HASKELL_IMAGE_TAG} AS build
 
@@ -24,12 +24,10 @@ RUN echo "Building cardano-node ${NODE_VERSION}..." && \
     echo "package cardano-crypto-praos"     >  cabal.project.local && \
     echo "  flags: -external-libsodium-vrf" >> cabal.project.local && \
     cabal update && \
-    cabal build cardano-node cardano-cli && \
+    cabal build cardano-node && \
     mkdir -p /build/bin && \
     cp $(cabal list-bin cardano-node) /build/bin/ && \
-    cp $(cabal list-bin cardano-cli)  /build/bin/ && \
-    strip /build/bin/cardano-node && \
-    strip /build/bin/cardano-cli
+    strip /build/bin/cardano-node
 
 # ============================================================================
 # Stage 2: Download pre-built companion tools
@@ -120,9 +118,8 @@ RUN useradd -m -d /home/guild -s /bin/bash -u 1000 guild && \
     echo "guild ALL=NOPASSWD: /bin/chattr" > /etc/sudoers.d/cntools && \
     chmod 0440 /etc/sudoers.d/cntools
 
-# Copy source-built binaries from Stage 1
+# Copy source-built node binary from Stage 1
 COPY --from=build /build/bin/cardano-node /usr/local/bin/
-COPY --from=build /build/bin/cardano-cli  /usr/local/bin/
 
 # Copy shared libraries from build stage that are newer than Debian bookworm
 COPY --from=build /usr/local/lib/libsecp256k1.so.2     /usr/local/lib/
@@ -137,14 +134,15 @@ COPY --from=tools /usr/local/bin/nview     /usr/local/bin/
 COPY --from=tools /usr/local/bin/txtop     /usr/local/bin/
 COPY --from=tools /usr/local/bin/cncli     /usr/local/bin/
 
-# ---- Install Guild Operators scripts (run as root with SUDO=N) ----
+# ---- Install Guild Operators scripts (APEX fork: Scitz0/guild-operators-apex) ----
+# The APEX fork is compatible with node >= 9.2.1 and CLI >= 9.4.1.0
 # Pass 1: Download helper scripts and platform configs
-ARG G_ACCOUNT=cardano-community
-ARG GUILD_DEPLOY_BRANCH=master
+ARG G_ACCOUNT=Scitz0
+ARG GUILD_DEPLOY_BRANCH=main
 
 RUN apt-get update && \
     curl -sS -o /tmp/guild-deploy.sh \
-      https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
+      https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
     chmod +x /tmp/guild-deploy.sh && \
     SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y CNODE_HOME=${CNODE_HOME} \
     bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -s p && \
@@ -159,21 +157,6 @@ RUN SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y CNODE_HOME=${CNODE_HOME} \
     mv /root/.local/bin /home/guild/.local/ 2>/dev/null || true && \
     chown -R guild:guild /home/guild/
 
-# Patch CNTools for cardano-node 10.6+ pool-state field name changes
-# (upstream guild-operators uses old field names: pledge/margin/cost/metadata/relays/owners/rewardAccount
-#  but 10.6+ pool-state returns: spsPledge/spsMargin/spsCost/spsMetadata/spsRelays/spsOwners/spsRewardAccount)
-RUN sed -i \
-    -e "s/'.pledge \/\/0'/'.spsPledge \/\/ .pledge \/\/0'/g" \
-    -e "s/'.margin \/\/0'/'.spsMargin \/\/ .margin \/\/0'/g" \
-    -e "s/'.cost \/\/0'/'.spsCost \/\/ .cost \/\/0'/g" \
-    -e "s/'.metadata.url \/\/empty'/'.spsMetadata.url \/\/ .metadata.url \/\/empty'/g" \
-    -e "s/'.metadata.hash \/\/empty'/'.spsMetadata.hash \/\/ .metadata.hash \/\/empty'/g" \
-    -e "s/'.relays\[\] \/\/empty'/'.spsRelays[] \/\/ .relays[] \/\/empty'/g" \
-    -e "s/'.owners\[\] \/\/ empty'/'.spsOwners[] \/\/ .owners[] \/\/ empty'/g" \
-    -e "s/.rewardAccount.credential/.spsRewardAccount.credential \/\/ .rewardAccount.credential/g" \
-    ${CNODE_HOME}/scripts/cntools.sh && \
-    echo "CNTools patched for 10.6+ pool-state field names"
-
 # Download configs for all supported Cardano networks
 RUN bash -c 'networks=(guild mainnet preprod preview); \
     files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json); \
@@ -181,40 +164,38 @@ RUN bash -c 'networks=(guild mainnet preprod preview); \
         mkdir -pv ${CNODE_HOME}/files/${network} && \
         for file in "${files[@]}"; do \
             curl -s -o ${CNODE_HOME}/files/${network}/${file} \
-              https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
+              https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
         done; \
     done' && chown -R guild:guild /opt/cardano
 
 # Download configs for ApexFusion Vector networks (afpm=mainnet, afpt=testnet)
 # ApexFusion uses the same cardano-node binary but with its own genesis/topology
 # Source: Scitz0/guild-operators-apex (official APEX fork of Guild Operators)
-ARG APEX_G_ACCOUNT=Scitz0
-ARG APEX_GUILD_BRANCH=main
 RUN bash -c 'networks=(afpm afpt); \
     files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json db-sync-config.json); \
     for network in "${networks[@]}"; do \
         mkdir -pv ${CNODE_HOME}/files/${network} && \
         for file in "${files[@]}"; do \
             curl -s -o ${CNODE_HOME}/files/${network}/${file} \
-              https://raw.githubusercontent.com/'${APEX_G_ACCOUNT}'/guild-operators-apex/'${APEX_GUILD_BRANCH}'/files/configs/${network}/${file} 2>/dev/null || true; \
+              https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
         done; \
     done' && chown -R guild:guild /opt/cardano
 
-# Download cardano-cli 9.4.1.0 for ApexFusion compatibility
-# APEX tooling requires CLI 9.4.1.0; the entrypoint swaps it in for afpm/afpt
-ARG APEX_CLI_VERSION=9.4.1.0
+# Download cardano-cli 9.4.1.0 (the sole CLI for this image)
+# APEX Guild scripts require CLI >= 9.4.1.0; node 10.1.4 does not ship a CLI binary
+ARG CLI_VERSION=9.4.1.0
 RUN ARCH=$(uname -m | sed 's/aarch64/aarch64/;s/x86_64/x86_64/') && \
-    curl -sL "https://github.com/IntersectMBO/cardano-cli/releases/download/cardano-cli-${APEX_CLI_VERSION}/cardano-cli-${APEX_CLI_VERSION}-${ARCH}-linux.tar.gz" \
+    curl -sL "https://github.com/IntersectMBO/cardano-cli/releases/download/cardano-cli-${CLI_VERSION}/cardano-cli-${CLI_VERSION}-${ARCH}-linux.tar.gz" \
       | tar xz -C /tmp && \
-    mv /tmp/cardano-cli-${ARCH}-linux /usr/local/bin/cardano-cli-apex && \
-    chmod +x /usr/local/bin/cardano-cli-apex && \
+    mv /tmp/cardano-cli-${ARCH}-linux /usr/local/bin/cardano-cli && \
+    chmod +x /usr/local/bin/cardano-cli && \
     rm -rf /tmp/cardano-cli-* && \
-    echo "Installed cardano-cli-apex (${APEX_CLI_VERSION}) alongside default CLI"
+    echo "Installed cardano-cli ${CLI_VERSION}"
 
 # Download additional mithril guild scripts
 RUN for script in mithril-client.sh mithril-signer.sh mithril-relay.sh; do \
       curl -sS -o ${CNODE_HOME}/scripts/${script} \
-        "https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
+        "https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
         chmod +x ${CNODE_HOME}/scripts/${script} 2>/dev/null || true; \
     done && chown -R guild:guild ${CNODE_HOME}/scripts/
 

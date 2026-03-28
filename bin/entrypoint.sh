@@ -961,49 +961,13 @@ fi
 log "============================================"
 
 log "cardano-node $(cardano-node --version 2>/dev/null | head -1)"
+log "cardano-cli  $(cardano-cli --version 2>/dev/null | head -1)"
 
 # 1. Install runtime deps (e2fsprogs, sudo) if missing
 install_runtime_deps
 
 # 2. Setup network configs
 setup_network_configs
-
-# 2a. Swap cardano-cli for APEX networks (requires CLI 9.4.1.0)
-if [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; then
-    if [ -x /usr/local/bin/cardano-cli-apex ]; then
-        log "ApexFusion: activating cardano-cli-apex (9.4.1.0) as default CLI"
-        mkdir -p /home/guild/.local/bin
-        ln -sf /usr/local/bin/cardano-cli-apex /home/guild/.local/bin/cardano-cli
-        export PATH="/home/guild/.local/bin:${PATH}"
-        # Persist for ALL shell modes including non-interactive (kubectl exec -- bash -c)
-        # Must be BEFORE the interactive guard in .bashrc (case $- in *i*)...)
-        if ! grep -q '/.local/bin' /home/guild/.bashrc 2>/dev/null; then
-            sed -i '1i export PATH="/home/guild/.local/bin:${PATH}"' /home/guild/.bashrc
-        fi
-        # Guild tools (gLiveView, cntools, etc.) require CLI >= 10.11.x.x for
-        # version checks and query commands. Point CCLI at the node-bundled CLI
-        # so Guild scripts pass validation, while the user PATH keeps 9.4.1.0.
-        if [ -f "/opt/cardano/cnode/scripts/env" ]; then
-            sed -i 's|^#\?CCLI=.*|CCLI="/usr/local/bin/cardano-cli"|' "/opt/cardano/cnode/scripts/env"
-            # AFPM shares networkMagic 764824073 with Cardano mainnet, so Guild
-            # scripts default SHELLEY_TRANS_EPOCH to 208 (Cardano) instead of 2
-            # (APEX). Pre-set it in env so the case-statement won't override it.
-            # Also override NETWORK_NAME for clarity in gLiveView header.
-            if [ "${NETWORK}" = "afpm" ]; then
-                sed -i 's|^#\?SHELLEY_TRANS_EPOCH=.*|SHELLEY_TRANS_EPOCH=2|' "/opt/cardano/cnode/scripts/env"
-                sed -i 's|^#\?NETWORK_NAME=.*|NETWORK_NAME="APEX Mainnet"|' "/opt/cardano/cnode/scripts/env"
-                log "ApexFusion: SHELLEY_TRANS_EPOCH=2, NETWORK_NAME=APEX Mainnet"
-            elif [ "${NETWORK}" = "afpt" ]; then
-                sed -i 's|^#\?NETWORK_NAME=.*|NETWORK_NAME="APEX Testnet"|' "/opt/cardano/cnode/scripts/env"
-                log "ApexFusion: NETWORK_NAME=APEX Testnet"
-            fi
-        fi
-        log "cardano-cli -> $(cardano-cli --version 2>/dev/null | head -1)"
-        log "Guild CCLI  -> $(/usr/local/bin/cardano-cli --version 2>/dev/null | head -1)"
-    else
-        warn "cardano-cli-apex not found — APEX tooling may not work correctly"
-    fi
-fi
 
 # 3. Customise configs (bind 0.0.0.0, enable chattr)
 customise_configs
