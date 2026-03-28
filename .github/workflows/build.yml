@@ -11,7 +11,7 @@ on:
       node_version:
         description: 'cardano-node version to build'
         required: false
-        default: '10.6.2'
+        default: '10.1.4'
 
 env:
   REGISTRY: ghcr.io
@@ -66,7 +66,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "node_version=${{ github.event.inputs.node_version }}" >> $GITHUB_OUTPUT
           else
-            echo "node_version=10.6.2" >> $GITHUB_OUTPUT
+            echo "node_version=10.1.4" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push
