@@ -144,14 +144,14 @@ RUN apt-get update && \
     curl -sS -o /tmp/guild-deploy.sh \
       https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
     chmod +x /tmp/guild-deploy.sh && \
-    SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y CNODE_HOME=${CNODE_HOME} \
-    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -s p && \
+    SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y \
+    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -p /opt/cardano -s p && \
     apt-get -y purge && apt-get -y clean && apt-get -y autoremove && \
     rm -rf /var/lib/apt/lists/*
 
 # Pass 2: Download scripts, configs, mithril helpers, wallet, other tools
-RUN SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y CNODE_HOME=${CNODE_HOME} \
-    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -s dcmowx && \
+RUN SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y \
+    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -p /opt/cardano -s dcmowx && \
     rm -f /tmp/guild-deploy.sh && \
     chown -R guild:guild ${CNODE_HOME} && \
     mv /root/.local/bin /home/guild/.local/ 2>/dev/null || true && \
