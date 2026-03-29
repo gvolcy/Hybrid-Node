@@ -126,6 +126,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
+        if: github.event_name != 'workflow_dispatch'
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -146,6 +147,7 @@ jobs:
             ${{ steps.meta.outputs.tags }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.params.outputs.node_version }}
             ${{ steps.params.outputs.image_tag != '' && format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, steps.params.outputs.image_tag) || '' }}
+            ${{ github.event_name == 'workflow_dispatch' && format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, steps.params.outputs.chain) || '' }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             NODE_VERSION=${{ steps.params.outputs.node_version }}
