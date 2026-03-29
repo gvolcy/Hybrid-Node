@@ -134,15 +134,17 @@ COPY --from=tools /usr/local/bin/nview     /usr/local/bin/
 COPY --from=tools /usr/local/bin/txtop     /usr/local/bin/
 COPY --from=tools /usr/local/bin/cncli     /usr/local/bin/
 
-# ---- Install Guild Operators scripts (APEX fork: Scitz0/guild-operators-apex) ----
-# The APEX fork is compatible with node >= 9.2.1 and CLI >= 9.4.1.0
+# ---- Install Guild Operators scripts ---- ----
+# Cardano: cardano-community/guild-operators (master)
+# ApexFusion: Scitz0/guild-operators-apex (main)
 # Pass 1: Download helper scripts and platform configs
 ARG G_ACCOUNT=Scitz0
+ARG GUILD_REPO=guild-operators-apex
 ARG GUILD_DEPLOY_BRANCH=main
 
 RUN apt-get update && \
     curl -sS -o /tmp/guild-deploy.sh \
-      https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
+      https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
     chmod +x /tmp/guild-deploy.sh && \
     SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y \
     bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -p /opt/cardano -s p && \
@@ -164,7 +166,7 @@ RUN bash -c 'networks=(guild mainnet preprod preview); \
         mkdir -pv ${CNODE_HOME}/files/${network} && \
         for file in "${files[@]}"; do \
             curl -s -o ${CNODE_HOME}/files/${network}/${file} \
-              https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
+              https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
         done; \
     done' && chown -R guild:guild /opt/cardano
 
@@ -177,7 +179,7 @@ RUN bash -c 'networks=(afpm afpt); \
         mkdir -pv ${CNODE_HOME}/files/${network} && \
         for file in "${files[@]}"; do \
             curl -s -o ${CNODE_HOME}/files/${network}/${file} \
-              https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
+              https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
         done; \
     done' && chown -R guild:guild /opt/cardano
 
@@ -195,7 +197,7 @@ RUN ARCH=$(uname -m | sed 's/aarch64/aarch64/;s/x86_64/x86_64/') && \
 # Download additional mithril guild scripts
 RUN for script in mithril-client.sh mithril-signer.sh mithril-relay.sh; do \
       curl -sS -o ${CNODE_HOME}/scripts/${script} \
-        "https://raw.githubusercontent.com/${G_ACCOUNT}/guild-operators-apex/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
+        "https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
         chmod +x ${CNODE_HOME}/scripts/${script} 2>/dev/null || true; \
     done && chown -R guild:guild ${CNODE_HOME}/scripts/
 

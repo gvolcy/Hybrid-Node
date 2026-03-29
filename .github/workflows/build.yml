@@ -8,10 +8,30 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      chain:
+        description: 'Target chain (sets defaults for guild/cli)'
+        required: true
+        default: 'apexfusion'
+        type: choice
+        options:
+          - cardano
+          - apexfusion
       node_version:
         description: 'cardano-node version to build'
-        required: false
+        required: true
         default: '10.1.4'
+      cli_version:
+        description: 'cardano-cli version (leave empty for auto)'
+        required: false
+        default: ''
+      guild_account:
+        description: 'Guild operators GitHub account (leave empty for auto)'
+        required: false
+        default: ''
+      guild_branch:
+        description: 'Guild operators branch (leave empty for auto)'
+        required: false
+        default: ''
 
 env:
   REGISTRY: ghcr.io
@@ -27,8 +47,6 @@ jobs:
     strategy:
       matrix:
         platform: [linux/amd64]
-        # Uncomment for multi-arch (requires QEMU, slower builds):
-        # platform: [linux/amd64, linux/arm64]
 
     steps:
       - name: Checkout
@@ -49,6 +67,63 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine build parameters
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            NODE_VERSION="${{ github.event.inputs.node_version }}"
+            CHAIN="${{ github.event.inputs.chain }}"
+
+            # Set chain-specific defaults
+            if [ "$CHAIN" = "cardano" ]; then
+              CLI_VERSION="${{ github.event.inputs.cli_version }}"
+              [ -z "$CLI_VERSION" ] && CLI_VERSION="10.15.1.0"
+              G_ACCOUNT="${{ github.event.inputs.guild_account }}"
+              [ -z "$G_ACCOUNT" ] && G_ACCOUNT="cardano-community"
+              GUILD_BRANCH="${{ github.event.inputs.guild_branch }}"
+              [ -z "$GUILD_BRANCH" ] && GUILD_BRANCH="master"
+              GUILD_REPO="guild-operators"
+            else
+              # ApexFusion defaults
+              CLI_VERSION="${{ github.event.inputs.cli_version }}"
+              [ -z "$CLI_VERSION" ] && CLI_VERSION="9.4.1.0"
+              G_ACCOUNT="${{ github.event.inputs.guild_account }}"
+              [ -z "$G_ACCOUNT" ] && G_ACCOUNT="Scitz0"
+              GUILD_BRANCH="${{ github.event.inputs.guild_branch }}"
+              [ -z "$GUILD_BRANCH" ] && GUILD_BRANCH="main"
+            GUILD_REPO="guild-operators-apex"
+            fi
+
+            IMAGE_TAG="${NODE_VERSION}-${CHAIN}"
+          else
+            # Push/PR: build ApexFusion default
+            NODE_VERSION="10.1.4"
+            CLI_VERSION="9.4.1.0"
+            G_ACCOUNT="Scitz0"
+            GUILD_BRANCH="main"
+            GUILD_REPO="guild-operators-apex"
+            CHAIN="apexfusion"
+            IMAGE_TAG=""
+          fi
+
+          echo "node_version=${NODE_VERSION}" >> $GITHUB_OUTPUT
+          echo "cli_version=${CLI_VERSION}" >> $GITHUB_OUTPUT
+          echo "g_account=${G_ACCOUNT}" >> $GITHUB_OUTPUT
+          echo "guild_branch=${GUILD_BRANCH}" >> $GITHUB_OUTPUT
+          echo "guild_repo=${GUILD_REPO}" >> $GITHUB_OUTPUT
+          echo "chain=${CHAIN}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+          echo "### Build Parameters" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Chain | ${CHAIN} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Node Version | ${NODE_VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CLI Version | ${CLI_VERSION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Guild Account | ${G_ACCOUNT} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Guild Branch | ${GUILD_BRANCH} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Guild Repo | ${GUILD_REPO} |" >> $GITHUB_STEP_SUMMARY
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -60,15 +135,6 @@ jobs:
             type=sha,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Determine node version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "node_version=${{ github.event.inputs.node_version }}" >> $GITHUB_OUTPUT
-          else
-            echo "node_version=10.1.4" >> $GITHUB_OUTPUT
-          fi
-
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
@@ -78,10 +144,15 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ steps.meta.outputs.tags }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.node_version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.params.outputs.node_version }}
+            ${{ steps.params.outputs.image_tag != '' && format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, steps.params.outputs.image_tag) || '' }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            NODE_VERSION=${{ steps.version.outputs.node_version }}
+            NODE_VERSION=${{ steps.params.outputs.node_version }}
+            CLI_VERSION=${{ steps.params.outputs.cli_version }}
+            G_ACCOUNT=${{ steps.params.outputs.g_account }}
+            GUILD_DEPLOY_BRANCH=${{ steps.params.outputs.guild_branch }}
+            GUILD_REPO=${{ steps.params.outputs.guild_repo }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -90,9 +161,17 @@ jobs:
         run: |
           echo "## 🔀 Hybrid-Node Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**cardano-node version:** ${{ steps.version.outputs.node_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Chain:** ${{ steps.params.outputs.chain }}" >> $GITHUB_STEP_SUMMARY
+          echo "**cardano-node:** ${{ steps.params.outputs.node_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**cardano-cli:** ${{ steps.params.outputs.cli_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Guild:** ${{ steps.params.outputs.g_account }}/${{ steps.params.outputs.guild_branch }}" >> $GITHUB_STEP_SUMMARY
           echo "**Platform:** ${{ matrix.platform }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.params.outputs.node_version }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.params.outputs.image_tag }}" ]; then
+            echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.params.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          fi
           echo '```' >> $GITHUB_STEP_SUMMARY
