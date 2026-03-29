@@ -605,7 +605,25 @@ add_custom_peers() {
             '. += [{"address": $a, "port": ($p | tonumber)}]')
     done
 
-    if jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
+    if [ "${NODE_MODE}" = "bp" ]; then
+        # BP mode: replace entire topology with ONLY the custom peers (locked-down)
+        # BPs should connect exclusively to their own relays, never to public peers
+        local num_peers=${#PEER_LIST[@]}
+        jq -n --argjson peers "${peers_json}" --argjson n "${num_peers}" '{
+            "bootstrapPeers": [],
+            "localRoots": [{
+                "accessPoints": $peers,
+                "advertise": false,
+                "trustable": true,
+                "hotValency": $n,
+                "warmValency": $n
+            }],
+            "publicRoots": [],
+            "useLedgerAfterSlot": -1
+        }' > "${topology}"
+        log "BP topology: set ${num_peers} exclusive relay peers (locked-down, no public roots)"
+    elif jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
+        # Relay mode: append custom peers to existing topology
         jq --argjson peers "${peers_json}" \
             '.localRoots += [{"accessPoints": $peers, "advertise": false, "trustable": false, "valency": ($peers | length)}]' \
             "${topology}" > "${topology}.tmp" && mv "${topology}.tmp" "${topology}"
