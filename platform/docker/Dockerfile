@@ -17,8 +17,8 @@ FROM ghcr.io/blinklabs-io/haskell:${HASKELL_IMAGE_TAG} AS build
 
 ARG NODE_VERSION
 
-# Install build deps for node >= 10.7.0 (blockio-uring needs liburing, LSM backend needs snappy)
-RUN apt-get update && apt-get install -y --no-install-recommends liburing-dev libsnappy-dev && rm -rf /var/lib/apt/lists/*
+# Install build deps for node >= 10.7.0 (blockio-uring, LSM snappy, gRPC protobuf)
+RUN apt-get update && apt-get install -y --no-install-recommends liburing-dev libsnappy-dev protobuf-compiler && rm -rf /var/lib/apt/lists/*
 
 RUN echo "Building cardano-node ${NODE_VERSION}..." && \
     git clone --depth 1 --branch ${NODE_VERSION} \
