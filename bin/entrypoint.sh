@@ -441,6 +441,8 @@ configure_pool() {
         fi
         if [ -n "${CNODE_PORT}" ]; then
             sed -i "s|#CNODE_PORT=.*|CNODE_PORT=${CNODE_PORT}|g" "${env_file}" 2>/dev/null || true
+            # Also update if already set to a different value (e.g. PV-persisted env file)
+            sed -i "s|^CNODE_PORT=.*|CNODE_PORT=${CNODE_PORT}|g" "${env_file}" 2>/dev/null || true
         fi
     fi
 
