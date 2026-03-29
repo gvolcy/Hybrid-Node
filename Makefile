@@ -13,14 +13,14 @@ help: ## Show this help
 awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the Docker image (amd64)
-docker build \
+docker build -f platform/docker/Dockerfile \
 --build-arg NODE_VERSION=$(NODE_VERSION) \
 -t $(IMAGE_NAME):$(TAG) \
 -t $(IMAGE_NAME):latest \
 .
 
 build-multi: ## Build multi-arch image (amd64 + arm64)
-docker buildx build \
+docker buildx build -f platform/docker/Dockerfile \
 --platform linux/amd64,linux/arm64 \
 --build-arg NODE_VERSION=$(NODE_VERSION) \
 -t $(IMAGE_NAME):$(TAG) \
