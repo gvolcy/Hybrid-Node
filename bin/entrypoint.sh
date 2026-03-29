@@ -610,57 +610,21 @@ add_custom_peers() {
     if [ "${NODE_MODE}" = "bp" ]; then
         # BP mode: replace entire topology with ONLY the custom peers (locked-down)
         # BPs should connect exclusively to their own relays, never to public peers
-        # Tier 2: Add network genesis relays as backup connections
         local num_peers=${#PEER_LIST[@]}
-        local genesis_peers="[]"
-        case "${NETWORK}" in
-            afpm)
-                genesis_peers='[{"address":"relay-g1.prime.mainnet.apexfusion.org","port":5521},{"address":"relay-g2.prime.mainnet.apexfusion.org","port":5521}]'
-                ;;
-            afpt)
-                genesis_peers='[{"address":"relay-0.prime.testnet.apexfusion.org","port":5521},{"address":"relay-1.prime.testnet.apexfusion.org","port":5521}]'
-                ;;
-        esac
-
         local topology_json
-        if [ "${genesis_peers}" != "[]" ]; then
-            topology_json=$(jq -n --argjson peers "${peers_json}" --argjson n "${num_peers}" --argjson genesis "${genesis_peers}" '{
-                "bootstrapPeers": [],
-                "localRoots": [
-                    {
-                        "accessPoints": $peers,
-                        "advertise": false,
-                        "trustable": true,
-                        "hotValency": $n,
-                        "warmValency": $n
-                    },
-                    {
-                        "accessPoints": $genesis,
-                        "advertise": false,
-                        "trustable": true,
-                        "hotValency": 1,
-                        "warmValency": 2
-                    }
-                ],
-                "publicRoots": [],
-                "useLedgerAfterSlot": -1
-            }')
-            log "BP topology: set ${num_peers} relay peers + $(echo "${genesis_peers}" | jq length) genesis backup peers (locked-down)"
-        else
-            topology_json=$(jq -n --argjson peers "${peers_json}" --argjson n "${num_peers}" '{
-                "bootstrapPeers": [],
-                "localRoots": [{
-                    "accessPoints": $peers,
-                    "advertise": false,
-                    "trustable": true,
-                    "hotValency": $n,
-                    "warmValency": $n
-                }],
-                "publicRoots": [],
-                "useLedgerAfterSlot": -1
-            }')
-            log "BP topology: set ${num_peers} exclusive relay peers (locked-down, no public roots)"
-        fi
+        topology_json=$(jq -n --argjson peers "${peers_json}" --argjson n "${num_peers}" '{
+            "bootstrapPeers": [],
+            "localRoots": [{
+                "accessPoints": $peers,
+                "advertise": false,
+                "trustable": true,
+                "hotValency": $n,
+                "warmValency": $n
+            }],
+            "publicRoots": [],
+            "useLedgerAfterSlot": -1
+        }')
+        log "BP topology: set ${num_peers} exclusive relay peers (locked-down, no public roots)"
         echo "${topology_json}" > "${topology}"
     elif jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
         # Relay mode: append custom peers to existing topology
