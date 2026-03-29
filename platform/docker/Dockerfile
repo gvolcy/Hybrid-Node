@@ -17,6 +17,9 @@ FROM ghcr.io/blinklabs-io/haskell:${HASKELL_IMAGE_TAG} AS build
 
 ARG NODE_VERSION
 
+# Install liburing-dev (required for blockio-uring in node >= 10.7.0)
+RUN apt-get update && apt-get install -y --no-install-recommends liburing-dev && rm -rf /var/lib/apt/lists/*
+
 RUN echo "Building cardano-node ${NODE_VERSION}..." && \
     git clone --depth 1 --branch ${NODE_VERSION} \
       https://github.com/IntersectMBO/cardano-node.git /build/cardano-node && \
