@@ -211,16 +211,18 @@ helm install cardano-relay ./charts/hybrid-node \
 ## Included Tools
 
 | Tool | Source | Purpose |
-|------|--------|---------|
-| `cardano-node` | [IntersectMBO](https://github.com/IntersectMBO/cardano-node) (source-built) | The node |
-| `cardano-cli` | [IntersectMBO](https://github.com/IntersectMBO/cardano-cli) | CLI |
-| `cntools.sh` | [Guild Operators](https://github.com/cardano-community/guild-operators) | Pool management |
-| `gLiveView.sh` | Guild Operators | Real-time dashboard |
-| `cncli` | [cardano-community](https://github.com/cardano-community/cncli) | Leader logs, validation |
-| `mithril-client` | [IOG](https://github.com/input-output-hk/mithril) | Fast chain sync |
-| `mithril-signer` | IOG | Mithril signing for SPOs |
-| `nview` | [Blink Labs](https://github.com/blinklabs-io/nview) | TUI monitor |
-| `txtop` | [Blink Labs](https://github.com/blinklabs-io/txtop) | Mempool display |
+|------|--------|----------|
+| `cardano-node` | [IntersectMBO/cardano-node](https://github.com/IntersectMBO/cardano-node) (source-built) | Ouroboros consensus node |
+| `cardano-cli` | [IntersectMBO/cardano-cli](https://github.com/IntersectMBO/cardano-cli) | Transaction and governance CLI |
+| `cntools.sh` | [Guild Operators](https://github.com/cardano-community/guild-operators) | Pool registration & management |
+| `gLiveView.sh` | Guild Operators | Real-time node dashboard |
+| `cncli` | [cardano-community/cncli](https://github.com/cardano-community/cncli) | Slot leader logs, block validation, PoolTool |
+| `mithril-client` | [input-output-hk/mithril](https://github.com/input-output-hk/mithril) | Fast chain sync via certified snapshots |
+| `mithril-signer` | [input-output-hk/mithril](https://github.com/input-output-hk/mithril) | Mithril signing protocol for SPOs |
+| `nview` | [blinklabs-io/nview](https://github.com/blinklabs-io/nview) | TUI node monitor |
+| `txtop` | [blinklabs-io/txtop](https://github.com/blinklabs-io/txtop) | Mempool transaction display |
+
+> 📦 See the upstream [cardano-node releases](https://github.com/IntersectMBO/cardano-node/releases) for the latest version information, system requirements, and compatibility matrix.
 
 ---
 
