@@ -1,73 +1,110 @@
 # 🔀 Hybrid-Node
 
-**A multi-chain node deployment framework for operators running Cardano and ApexFusion infrastructure using Docker, Helm, and K3s.**
+**Multi-chain node deployment framework for Cardano and ApexFusion using Docker, Helm, and K3s.**
 
 [![Build and Push](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Hybrid-Node is an operator-focused deployment framework for running Cardano and ApexFusion blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular, production-friendly deployment workflows for relay and block producer environments.
 
 > 🟢 **Production-validated** — Running across 15 nodes: Cardano mainnet (VOLCY & SILEM stake pools) and ApexFusion Vector (AFPM/AFPT) networks.
 
 ---
 
-## What is Hybrid-Node?
-
-Hybrid-Node is **not** one node that does everything.
-
-Hybrid-Node **is** one framework that can deploy multiple blockchain node stacks cleanly.
-
-It provides a shared infrastructure platform while keeping each blockchain implementation isolated, modular, and production-friendly.
-
 ## Supported Chains
 
 | Chain | Networks | Status |
 |-------|----------|--------|
-| **Cardano** | mainnet, preprod, preview, guild | ✅ Production |
-| **ApexFusion** | afpm (mainnet), afpt (testnet) | ✅ Production |
+| [**Cardano**](chains/cardano/) | mainnet, preprod, preview, guild | ✅ Production |
+| [**ApexFusion**](chains/apexfusion/) | afpm (mainnet), afpt (testnet) | ✅ Production |
 
-## Design Goals
+This repository uses a **shared infrastructure model** while keeping each blockchain stack logically separated.
 
-- 🧩 **Modular chain separation** — each chain has its own configs, manifests, and docs
-- ☸️ **Kubernetes-native** — Helm charts and K3s manifests for production deployments
-- 🛠️ **Operator-focused tooling** — CNTools, gLiveView, CNCLI, Mithril, nview, txtop
-- 💾 **Persistent storage & recovery** — DB backup/restore, graceful 280s shutdown
-- 🔒 **Clean relay / block producer separation** — locked-down BP topology, NetworkPolicy support
-- 📦 **Reproducible builds** — every component version is explicit and pinned
+- `chains/cardano/` → Cardano-specific configs, K3s manifests, and documentation
+- `chains/apexfusion/` → ApexFusion-specific configs, K3s manifests, and documentation
+- `platform/` → Shared Dockerfile, entrypoint, and deployment logic
+- `charts/` → Helm charts for Kubernetes deployment
 
-## Repository Structure
+---
+
+## Architecture
+
+```
+                         Internet
+                            │
+                 ┌──────────┴──────────┐
+                 │    Relay Layer       │
+                 └──────────┬──────────┘
+                            │
+           ┌────────────────┴────────────────┐
+           │                                 │
+   ┌───────┴────────┐              ┌─────────┴──────────┐
+   │ Cardano Stack  │              │ ApexFusion Stack    │
+   │                │              │                     │
+   │  mainnet       │              │  afpm (mainnet)     │
+   │  preprod       │              │  afpt (testnet)     │
+   │  preview       │              │                     │
+   │  guild         │              │                     │
+   └───────┬────────┘              └─────────┬───────────┘
+           │                                 │
+   ┌───────┴─────────────────────────────────┴───────────┐
+   │           Shared Platform Layer                      │
+   │                                                      │
+   │  • cardano-node (source-compiled from IntersectMBO)  │
+   │  • Guild Operators tooling (CNTools, gLiveView)      │
+   │  • Monitoring (Prometheus, EKG, nview, txtop)        │
+   │  • Mithril (client + signer)                         │
+   │  • CNCLI (leader logs, validation, PoolTool)         │
+   │  • Graceful shutdown (280s SIGINT drain)              │
+   │  • DB backup / restore                               │
+   │  • Multi-pool key management                         │
+   │                                                      │
+   │  Docker · Helm · K3s · debian:bookworm-slim          │
+   └──────────────────────────────────────────────────────┘
+```
+
+---
+
+## Project Structure
 
 ```
 Hybrid-Node/
 ├── README.md
 ├── LICENSE
 │
-├── docs/                          # Documentation
-│   ├── architecture.md
-│   └── deployment.md
+├── docs/                           # Documentation
+│   ├── architecture.md             #   System design & runtime flow
+│   └── deployment.md               #   Full deployment guide
 │
-├── platform/                      # Shared infrastructure
+├── platform/                       # Shared infrastructure (all chains)
 │   ├── docker/
-│   │   └── Dockerfile             # Multi-stage build (all chains)
+│   │   └── Dockerfile              #   Multi-stage build
 │   └── bin/
-│       └── entrypoint.sh          # Unified entrypoint (1000+ lines)
+│       └── entrypoint.sh           #   Unified entrypoint (1000+ lines)
 │
-├── chains/                        # Chain-specific modules
-│   ├── cardano/
+├── chains/                         # Chain-specific modules
+│   ├── cardano/                    #   ← Cardano chain
 │   │   ├── README.md
-│   │   ├── configs/               # mainnet, preprod, preview, guild
-│   │   └── k3s/                   # bp.yaml, relay.yaml
+│   │   ├── configs/                #     mainnet, preprod, preview, guild
+│   │   └── k3s/                    #     bp.yaml, relay.yaml
 │   │
-│   └── apexfusion/
+│   └── apexfusion/                 #   ← ApexFusion chain
 │       ├── README.md
-│       ├── configs/               # afpm, afpt
-│       └── k3s/                   # bp.yaml, relay.yaml, testnet-relay.yaml
+│       ├── configs/                #     afpm, afpt
+│       └── k3s/                    #     bp.yaml, relay.yaml, testnet-relay.yaml
 │
-├── charts/                        # Helm charts
-│   └── hybrid-node/               # Shared Helm chart (network-selectable)
+├── charts/                         # Helm charts
+│   └── hybrid-node/                #   Shared chart (network-selectable)
 │
-└── examples/                      # Example deployments
-    ├── single-node/
-    └── production/
+├── examples/                       # Example deployments
+│   ├── single-node/
+│   └── production/
+│
+└── .github/workflows/              # CI/CD
+    └── build.yml
 ```
+
+---
 
 ## Quick Start
 
@@ -77,7 +114,7 @@ Hybrid-Node/
 docker pull ghcr.io/gvolcy/hybrid-node:latest
 ```
 
-### Run a Cardano relay
+### Cardano Relay
 
 ```bash
 docker run -d \
@@ -90,7 +127,24 @@ docker run -d \
   ghcr.io/gvolcy/hybrid-node:latest
 ```
 
-### Run an ApexFusion relay
+### Cardano Block Producer
+
+```bash
+docker run -d \
+  --name cardano-bp \
+  -e NETWORK=mainnet \
+  -e NODE_MODE=bp \
+  -e NODE_PORT=6000 \
+  -e POOL_NAME=MYPOOL \
+  -e CNCLI_ENABLED=Y \
+  -e MITHRIL_SIGNER=Y \
+  -v cardano-db:/opt/cardano/cnode/db \
+  -v cardano-keys:/opt/cardano/cnode/priv \
+  -p 6000:6000 \
+  ghcr.io/gvolcy/hybrid-node:latest
+```
+
+### ApexFusion Relay
 
 ```bash
 docker run -d \
@@ -118,7 +172,9 @@ helm install cardano-relay ./charts/hybrid-node \
   --set cardano.mode=relay
 ```
 
-> See [docs/deployment.md](docs/deployment.md) for full deployment guide including block producer setup.
+> 📖 See [docs/deployment.md](docs/deployment.md) for full deployment guide including BP setup, volume mounts, and monitoring.
+
+---
 
 ## Environment Variables
 
@@ -129,17 +185,17 @@ helm install cardano-relay ./charts/hybrid-node \
 | `NETWORK` | `mainnet` | `mainnet`, `preview`, `preprod`, `guild`, `afpm`, `afpt` |
 | `NODE_MODE` | `relay` | `relay` or `bp` |
 | `NODE_PORT` | `6000` | Node listening port |
-| `CUSTOM_PEERS` | (none) | Additional peers: `addr:port,addr:port,...` |
-| `CPU_CORES` | (unset) | Override RTS `-N` flag |
+| `CUSTOM_PEERS` | — | Additional peers: `addr:port,addr:port,...` |
+| `CPU_CORES` | — | Override RTS `-N` flag |
 
 ### Block Producer
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POOL_NAME` | (unset) | Pool name (key directory: `priv/pool/<name>/`) |
-| `POOL_ID` | (unset) | Pool ID hex (for CNCLI/PoolTool) |
-| `POOL_TICKER` | (unset) | Pool ticker |
-| `CNCLI_ENABLED` | `N` | Enable CNCLI sync/leaderlog/validate |
+| `POOL_NAME` | — | Pool name (key directory: `priv/pool/<name>/`) |
+| `POOL_ID` | — | Pool ID hex (for CNCLI / PoolTool) |
+| `POOL_TICKER` | — | Pool ticker |
+| `CNCLI_ENABLED` | `N` | Enable CNCLI sync / leaderlog / validate |
 | `MITHRIL_SIGNER` | `N` | Enable Mithril signer (Cardano only) |
 
 ### Monitoring
@@ -150,7 +206,7 @@ helm install cardano-relay ./charts/hybrid-node \
 | `PROMETHEUS_PORT` | `12798` | Prometheus metrics port |
 | `EKG_HOST` | `0.0.0.0` | EKG listen address |
 
-> See [docs/deployment.md](docs/deployment.md) for the complete environment variable reference.
+---
 
 ## Included Tools
 
@@ -166,31 +222,19 @@ helm install cardano-relay ./charts/hybrid-node \
 | `nview` | [Blink Labs](https://github.com/blinklabs-io/nview) | TUI monitor |
 | `txtop` | [Blink Labs](https://github.com/blinklabs-io/txtop) | Mempool display |
 
-## Architecture
+---
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Hybrid-Node Platform                   │
-│                                                          │
-│  ┌────────────────────┐    ┌─────────────────────┐       │
-│  │  Cardano Engine    │    │  ApexFusion Engine   │      │
-│  │  mainnet/preprod/  │    │  afpm / afpt         │      │
-│  │  preview/guild     │    │                      │      │
-│  └────────┬───────────┘    └──────────┬───────────┘      │
-│           │                           │                  │
-│  ┌────────┴───────────────────────────┴───────────┐      │
-│  │            Shared Platform Layer                │      │
-│  │  • cardano-node (source-compiled)               │      │
-│  │  • Guild Operators tooling                      │      │
-│  │  • Monitoring (Prometheus, EKG, nview, txtop)   │      │
-│  │  • Mithril (client + signer)                    │      │
-│  │  • CNCLI (leader logs, validation, PoolTool)    │      │
-│  │  • Entrypoint (1000+ lines, signal handling)    │      │
-│  │  • Graceful shutdown (280s SIGINT drain)         │      │
-│  └─────────────────────────────────────────────────┘      │
-│  debian:bookworm-slim                                    │
-└──────────────────────────────────────────────────────────┘
-```
+## Design Goals
+
+- 🧩 **Modular chain separation** — each chain has its own configs, manifests, and docs
+- ☸️ **Kubernetes-native** — Helm charts and K3s manifests for production deployments
+- 🛠️ **Operator-focused tooling** — CNTools, gLiveView, CNCLI, Mithril, nview, txtop
+- 💾 **Persistent storage & recovery** — DB backup/restore, graceful 280s shutdown
+- 🔒 **Relay / BP separation** — locked-down BP topology, NetworkPolicy support
+- 📦 **Reproducible builds** — every component version is explicit and pinned
+- 🏗️ **Multi-arch** — AMD64 and ARM64 support
+
+---
 
 ## Building
 
@@ -209,6 +253,8 @@ docker buildx build -f platform/docker/Dockerfile \
   -t ghcr.io/gvolcy/hybrid-node:latest --push .
 ```
 
+---
+
 ## Credits
 
 - [Guild Operators](https://github.com/cardano-community/guild-operators) — MIT License
@@ -219,7 +265,7 @@ docker buildx build -f platform/docker/Dockerfile \
 
 ## License
 
-MIT License — See [LICENSE](LICENSE) for details.
+MIT — See [LICENSE](LICENSE) for details.
 
 ---
 
