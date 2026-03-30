@@ -304,6 +304,26 @@ customise_configs() {
             fi
         fi
 
+        # BP nodes: Harden P2P peer settings
+        # BPs must ONLY connect to their own relays — never discover or accept
+        # public peers.  PeerSharing lets peers exchange addresses, causing the
+        # BP to connect outbound to random internet peers.  High target numbers
+        # amplify the problem by making the node actively fill those slots.
+        if [ "${NODE_MODE}" = "bp" ]; then
+            log "BP mode: Hardening P2P peer settings (PeerSharing=disabled, targets=relay-count)"
+            local relay_count
+            relay_count=$(jq -r "[.localRoots[]?.accessPoints // [] | length] | add // 3" \
+                "${CONFIG_DIR}/topology.json" 2>/dev/null || echo 3)
+            jq --argjson rc "${relay_count}" '
+                .PeerSharing = false |
+                .TargetNumberOfActivePeers = $rc |
+                .TargetNumberOfEstablishedPeers = $rc |
+                .TargetNumberOfKnownPeers = $rc |
+                .TargetNumberOfRootPeers = $rc
+            ' "${main_config}" > "${main_config}.tmp" && \
+                mv "${main_config}.tmp" "${main_config}"
+        fi
+
         # Use legacy tracing system for Guild Operators compatibility
         # The new trace dispatcher (UseTraceDispatcher=true) outputs minimal logs
         # that gLiveView/cntools can't fully parse (missing chainDensity, utxoSize,
