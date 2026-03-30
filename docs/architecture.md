@@ -11,8 +11,8 @@ Hybrid-Node is a multi-chain node deployment framework. It provides shared infra
 │  ┌────────────────────┐    ┌────────────────────┐       │
 │  │   Cardano Engine   │    │ ApexFusion Engine   │      │
 │  │                    │    │                     │      │
-│  │  • mainnet         │    │  • afpm (mainnet)   │      │
-│  │  • preprod         │    │  • afpt (testnet)   │      │
+│  │  • mainnet         │    │  • mainnet (afpm)   │      │
+│  │  • preprod         │    │  • testnet (afpt)   │      │
 │  │  • preview         │    │                     │      │
 │  │  • guild           │    │                     │      │
 │  └────────┬───────────┘    └────────┬────────────┘      │

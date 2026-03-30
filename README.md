@@ -15,19 +15,38 @@ Running a stake pool shouldn't require stitching together five different repos, 
 
 ---
 
-## Supported Chains
+## Supported Networks
 
-| Chain | Networks | Status |
-|-------|----------|--------|
-| [**Cardano**](chains/cardano/) | mainnet, preprod, preview, guild | ✅ Production |
-| [**ApexFusion**](chains/apexfusion/) | afpm (mainnet), afpt (testnet) | ✅ Production |
+### Cardano
 
-This repository uses a **shared infrastructure model** while keeping each blockchain stack logically separated.
+| Network | `NETWORK=` | Status |
+|---------|------------|--------|
+| Mainnet | `mainnet` | ✅ Production |
+| Preprod | `preprod` | ✅ Supported |
+| Preview | `preview` | ✅ Supported |
+| Guild (SanchoNet) | `guild` | ✅ Supported |
 
-- `chains/cardano/` → Cardano-specific configs, K3s manifests, and documentation
-- `chains/apexfusion/` → ApexFusion-specific configs, K3s manifests, and documentation
-- `platform/` → Shared Dockerfile, entrypoint, and deployment logic
-- `charts/` → Helm charts for Kubernetes deployment
+### ApexFusion
+
+| Network | `NETWORK=` | Status |
+|---------|------------|--------|
+| Mainnet (Vector) | `afpm` | ✅ Production |
+| Testnet (Vector) | `afpt` | ✅ Production |
+
+> 📖 Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md)
+
+---
+
+## Shared vs Isolated
+
+Hybrid-Node uses a **shared platform** with **isolated chain configs**. Everything that is common across chains lives in one place; everything chain-specific lives under its own directory.
+
+| Layer | What | Where |
+|-------|------|-------|
+| **Shared** | Docker image, entrypoint, Helm chart, monitoring, shutdown logic | `platform/`, `charts/hybrid-node/` |
+| **Isolated** | Genesis files, topology, network configs, K3s manifests | `chains/cardano/`, `chains/apexfusion/` |
+
+The `NETWORK` environment variable selects which chain and network to run at container startup — the same image handles all of them.
 
 ---
 
@@ -45,8 +64,8 @@ This repository uses a **shared infrastructure model** while keeping each blockc
    ┌───────┴────────┐              ┌─────────┴──────────┐
    │ Cardano Stack  │              │ ApexFusion Stack    │
    │                │              │                     │
-   │  mainnet       │              │  afpm (mainnet)     │
-   │  preprod       │              │  afpt (testnet)     │
+   │  mainnet       │              │  mainnet (afpm)     │
+   │  preprod       │              │  testnet (afpt)     │
    │  preview       │              │                     │
    │  guild         │              │                     │
    └───────┬────────┘              └─────────┬───────────┘
@@ -94,7 +113,7 @@ Hybrid-Node/
 │   │
 │   └── apexfusion/                 #   ← ApexFusion chain
 │       ├── README.md
-│       ├── configs/                #     afpm, afpt
+│       ├── configs/                #     afpm (mainnet), afpt (testnet)
 │       └── k3s/                    #     bp.yaml, relay.yaml, testnet-relay.yaml
 │
 ├── charts/                         # Helm charts
