@@ -19,7 +19,7 @@ on:
       node_version:
         description: 'cardano-node version to build'
         required: true
-        default: '10.1.4'
+        default: '10.7.0'
       cli_version:
         description: 'cardano-cli version (leave empty for auto)'
         required: false

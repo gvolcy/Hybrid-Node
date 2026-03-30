@@ -308,8 +308,8 @@ docker build -f platform/docker/Dockerfile -t hybrid-node:latest .
 
 # Specific node version
 docker build -f platform/docker/Dockerfile \
-  --build-arg NODE_VERSION=10.6.2 \
-  -t hybrid-node:10.6.2 .
+  --build-arg NODE_VERSION=10.7.0 \
+  -t hybrid-node:10.7.0 .
 
 # Multi-arch
 docker buildx build -f platform/docker/Dockerfile \
