@@ -1,0 +1,119 @@
+# ============================================================================
+# Midnight Namespace, Postgres, and Secrets
+# ============================================================================
+# Usage:
+#   1. Replace placeholder keys with your validator keys
+#   2. Generate a secure postgres password
+#   3. kubectl apply -f namespace.yaml
+# ============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: midnight
+  labels:
+    name: midnight
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: midnight
+type: Opaque
+stringData:
+  password: "CHANGE-ME-generate-a-random-password"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: midnight-secrets
+  namespace: midnight
+type: Opaque
+stringData:
+  # libp2p node private key (generate with: docker run --rm parity/subkey:latest generate-node-key 2>/dev/null)
+  node-key: "CHANGE-ME-your-node-private-key-hex"
+  # Validator keys (hex with 0x prefix)
+  sidechain-pub-key: "0xCHANGE-ME-sidechain-public-key"
+  aura-pub-key: "0xCHANGE-ME-aura-public-key"
+  grandpa-pub-key: "0xCHANGE-ME-grandpa-public-key"
+  # Preview network boot nodes
+  bootnodes: "/dns/bootnode-1.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWK66i7dtGVNSwDh9tTeqov1q6LSdWsRLJvTyzTCaywYgK /dns/bootnode-2.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWHqFfXFwb7WW4jwR8pr4BEf562v5M6c8K3CXAJq4Wx6ym"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: midnight
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: midnight
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15.3
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+            - name: POSTGRES_DB
+              value: cexplorer
+            - name: POSTGRES_USER
+              value: postgres
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: midnight
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

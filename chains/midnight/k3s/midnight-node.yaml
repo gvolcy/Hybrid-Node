@@ -1,0 +1,228 @@
+# ============================================================================
+# Midnight Validator Node for K3s
+# Includes: midnight-node + key-inserter sidecar
+# ============================================================================
+# Prerequisites:
+#   - namespace.yaml must be applied (namespace + postgres + secrets)
+#   - cardano-stack.yaml must be applied and Cardano node synced
+# ============================================================================
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: midnight-data
+  namespace: midnight
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: key-inserter-script
+  namespace: midnight
+data:
+  insert-keys.sh: |
+    #!/bin/sh
+    set -e
+
+    echo "Waiting for midnight-node RPC to be ready..."
+
+    # Wait for RPC to be available (max 120 seconds)
+    RETRY=0
+    MAX_RETRY=120
+    until curl -s http://127.0.0.1:9944 > /dev/null 2>&1; do
+      RETRY=$((RETRY+1))
+      if [ $RETRY -ge $MAX_RETRY ]; then
+        echo "RPC not available after $MAX_RETRY seconds, exiting"
+        exit 1
+      fi
+      sleep 1
+    done
+
+    echo "Inserting AURA key..."
+    curl -s -X POST -H "Content-Type: application/json" \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_insertKey\",\"params\":[\"aura\",\"$AURA_PUB_KEY\",\"$AURA_PUB_KEY\"]}" \
+      http://127.0.0.1:9944
+
+    echo "Inserting GRANDPA key..."
+    curl -s -X POST -H "Content-Type: application/json" \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_insertKey\",\"params\":[\"gran\",\"$GRANDPA_PUB_KEY\",\"$GRANDPA_PUB_KEY\"]}" \
+      http://127.0.0.1:9944
+
+    echo "Inserting SIDECHAIN key..."
+    curl -s -X POST -H "Content-Type: application/json" \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_insertKey\",\"params\":[\"crch\",\"$SIDECHAIN_PUB_KEY\",\"$SIDECHAIN_PUB_KEY\"]}" \
+      http://127.0.0.1:9944
+
+    echo "Keys inserted successfully!"
+
+    # Keep running and re-check keys hourly
+    while true; do
+      sleep 3600
+      AURA_CHECK=$(curl -s -X POST -H "Content-Type: application/json" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_hasKey\",\"params\":[\"$AURA_PUB_KEY\",\"aura\"]}" \
+        http://127.0.0.1:9944 | grep -o '"result":[^,}]*' | cut -d: -f2)
+      if [ "$AURA_CHECK" != "true" ]; then
+        echo "Keys missing, re-inserting..."
+        curl -s -X POST -H "Content-Type: application/json" \
+          -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_insertKey\",\"params\":[\"aura\",\"$AURA_PUB_KEY\",\"$AURA_PUB_KEY\"]}" \
+          http://127.0.0.1:9944
+        curl -s -X POST -H "Content-Type: application/json" \
+          -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_insertKey\",\"params\":[\"gran\",\"$GRANDPA_PUB_KEY\",\"$GRANDPA_PUB_KEY\"]}" \
+          http://127.0.0.1:9944
+        curl -s -X POST -H "Content-Type: application/json" \
+          -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"author_insertKey\",\"params\":[\"crch\",\"$SIDECHAIN_PUB_KEY\",\"$SIDECHAIN_PUB_KEY\"]}" \
+          http://127.0.0.1:9944
+        echo "Keys re-inserted"
+      else
+        echo "Keys still loaded, all good"
+      fi
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: midnight-node
+  namespace: midnight
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: midnight-node
+  template:
+    metadata:
+      labels:
+        app: midnight-node
+    spec:
+      containers:
+        # ── Midnight Node ────────────────────────────────────────────────
+        - name: midnight-node
+          image: midnightntwrk/midnight-node:0.22.3
+          env:
+            - name: CFG_PRESET
+              value: preview
+            - name: NODE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: node-key
+            - name: BOOTNODES
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: bootnodes
+            - name: APPEND_ARGS
+              value: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe"
+            - name: DB_SYNC_POSTGRES_CONNECTION_STRING
+              value: "postgresql://postgres:CHANGE-ME@postgres:5432/cexplorer?sslmode=disable"
+            - name: ALLOW_NON_SSL
+              value: "true"
+            - name: CARDANO_SECURITY_PARAMETER
+              value: "432"
+            - name: CARDANO_ACTIVE_SLOTS_COEFF
+              value: "0.05"
+            - name: BLOCK_STABILITY_MARGIN
+              value: "0"
+          ports:
+            - containerPort: 9944
+              name: rpc
+            - containerPort: 30333
+              name: p2p
+            - containerPort: 9615
+              name: metrics
+          volumeMounts:
+            - name: midnight-data
+              mountPath: /node
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+
+        # ── Key Inserter Sidecar ─────────────────────────────────────────
+        - name: key-inserter
+          image: curlimages/curl:latest
+          command: ["/bin/sh", "/scripts/insert-keys.sh"]
+          env:
+            - name: AURA_PUB_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: aura-pub-key
+            - name: GRANDPA_PUB_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: grandpa-pub-key
+            - name: SIDECHAIN_PUB_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: sidechain-pub-key
+          volumeMounts:
+            - name: key-inserter-script
+              mountPath: /scripts
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+
+      volumes:
+        - name: midnight-data
+          persistentVolumeClaim:
+            claimName: midnight-data
+        - name: key-inserter-script
+          configMap:
+            name: key-inserter-script
+            defaultMode: 0755
+---
+# ── Services ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: midnight-rpc
+  namespace: midnight
+spec:
+  selector:
+    app: midnight-node
+  ports:
+    - port: 9944
+      targetPort: 9944
+      name: rpc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: midnight-p2p
+  namespace: midnight
+spec:
+  selector:
+    app: midnight-node
+  ports:
+    - port: 30333
+      targetPort: 30333
+      nodePort: 30333
+      name: p2p
+  type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: midnight-metrics
+  namespace: midnight
+spec:
+  selector:
+    app: midnight-node
+  ports:
+    - port: 9615
+      targetPort: 9615
+      name: metrics

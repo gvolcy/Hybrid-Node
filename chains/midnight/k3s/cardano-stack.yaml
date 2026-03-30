@@ -1,0 +1,210 @@
+# ============================================================================
+# Cardano Companion Stack for Midnight
+# Deploys: Cardano Node (Preview) + DB-Sync + Ogmios
+# ============================================================================
+# Prerequisites:
+#   - namespace.yaml must be applied first (creates namespace + postgres)
+#   - Postgres must be running and ready
+# ============================================================================
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cardano-data
+  namespace: midnight
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 150Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-sync-data
+  namespace: midnight
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+---
+# ── Cardano Node (Preview) ──────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardano-node
+  namespace: midnight
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cardano-node
+  template:
+    metadata:
+      labels:
+        app: cardano-node
+    spec:
+      containers:
+        - name: cardano-node
+          image: ghcr.io/intersectmbo/cardano-node:10.6.2
+          env:
+            - name: NETWORK
+              value: preview
+            - name: CARDANO_NODE_SOCKET_PATH
+              value: /ipc/node.socket
+          ports:
+            - containerPort: 3001
+              name: p2p
+          volumeMounts:
+            - name: cardano-data
+              mountPath: /data
+            - name: ipc
+              mountPath: /ipc
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+      volumes:
+        - name: cardano-data
+          persistentVolumeClaim:
+            claimName: cardano-data
+        - name: ipc
+          hostPath:
+            path: /tmp/midnight-cardano-ipc
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cardano-node
+  namespace: midnight
+spec:
+  selector:
+    app: cardano-node
+  ports:
+    - port: 3001
+      targetPort: 3001
+---
+# ── Cardano DB-Sync ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardano-db-sync
+  namespace: midnight
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cardano-db-sync
+  template:
+    metadata:
+      labels:
+        app: cardano-db-sync
+    spec:
+      containers:
+        - name: db-sync
+          image: ghcr.io/intersectmbo/cardano-db-sync:13.6.0.7
+          env:
+            - name: NETWORK
+              value: preview
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: cexplorer
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+          volumeMounts:
+            - name: ipc
+              mountPath: /node-ipc
+            - name: db-sync-data
+              mountPath: /var/lib
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+      volumes:
+        - name: ipc
+          hostPath:
+            path: /tmp/midnight-cardano-ipc
+            type: DirectoryOrCreate
+        - name: db-sync-data
+          persistentVolumeClaim:
+            claimName: db-sync-data
+---
+# ── Ogmios (optional — WebSocket bridge to Cardano) ─────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardano-ogmios
+  namespace: midnight
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cardano-ogmios
+  template:
+    metadata:
+      labels:
+        app: cardano-ogmios
+    spec:
+      containers:
+        - name: ogmios
+          image: cardanosolutions/ogmios:v6.14.0
+          ports:
+            - containerPort: 1337
+              name: websocket
+          volumeMounts:
+            - name: ipc
+              mountPath: /ipc
+            - name: data
+              mountPath: /data
+          command:
+            - /bin/ogmios
+            - --node-socket
+            - /ipc/node.socket
+            - --node-config
+            - /config/preview/config.json
+            - --host
+            - 0.0.0.0
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+      volumes:
+        - name: ipc
+          hostPath:
+            path: /tmp/midnight-cardano-ipc
+            type: DirectoryOrCreate
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cardano-ogmios
+  namespace: midnight
+spec:
+  selector:
+    app: cardano-ogmios
+  ports:
+    - port: 1337
+      targetPort: 1337

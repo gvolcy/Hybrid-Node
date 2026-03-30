@@ -1,17 +1,17 @@
 # 🔀 Hybrid-Node
 
-**Multi-chain node deployment framework for Cardano and ApexFusion using Docker, Helm, and K3s.**
+**Multi-chain node deployment framework for Cardano, ApexFusion, and Midnight using Docker, Helm, and K3s.**
 
 [![Build and Push](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Hybrid-Node is an operator-focused deployment framework for running Cardano and ApexFusion blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular, production-friendly deployment workflows for relay and block producer environments.
+Hybrid-Node is an operator-focused deployment framework for running Cardano, ApexFusion, and Midnight blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular, production-friendly deployment workflows for relay and block producer environments.
 
 ## Why This Exists
 
 Running a stake pool shouldn't require stitching together five different repos, hand-editing config files, and hoping your topology doesn't leak your BP to the public internet. Hybrid-Node consolidates the entire SPO toolchain — source-built `cardano-node`, Guild Operators scripts, Mithril, CNCLI, monitoring — into a single, version-pinned Docker image with a battle-tested entrypoint that handles config precedence, genesis hash verification, P2P peer hardening, graceful shutdown, and multi-pool key management out of the box. One image. Any chain. Any network. Deploy in seconds.
 
-> 🟢 **Production-validated** — Running across 15 nodes: Cardano mainnet (VOLCY & SILEM stake pools) and ApexFusion Vector (AFPM/AFPT) networks.
+> 🟢 **Production-validated** — Running across 17 nodes: Cardano mainnet (VOLCY & SILEM stake pools), ApexFusion Vector (AFPM/AFPT), and Midnight Preview networks.
 
 ---
 
@@ -33,7 +33,15 @@ Running a stake pool shouldn't require stitching together five different repos, 
 | Mainnet (Vector) | `afpm` | ✅ Production |
 | Testnet (Vector) | `afpt` | ✅ Production |
 
-> 📖 Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md)
+### Midnight
+
+| Network | Image | Status |
+|---------|-------|--------|
+| Preview | `midnightntwrk/midnight-node:0.22.3` | ✅ Production |
+
+> ⚠️ Midnight uses its own Substrate-based node image — it does **not** use the shared Hybrid-Node Docker image.
+
+> �� Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md) · [Midnight](chains/midnight/README.md)
 
 ---
 
@@ -44,7 +52,7 @@ Hybrid-Node uses a **shared platform** with **isolated chain configs**. Everythi
 | Layer | What | Where |
 |-------|------|-------|
 | **Shared** | Docker image, entrypoint, Helm chart, monitoring, shutdown logic | `platform/`, `charts/hybrid-node/` |
-| **Isolated** | Genesis files, topology, network configs, K3s manifests | `chains/cardano/`, `chains/apexfusion/` |
+| **Isolated** | Genesis files, topology, network configs, K3s manifests | `chains/cardano/`, `chains/apexfusion/`, `chains/midnight/` |
 
 The `NETWORK` environment variable selects which chain and network to run at container startup — the same image handles all of them.
 
@@ -53,37 +61,50 @@ The `NETWORK` environment variable selects which chain and network to run at con
 ## Architecture
 
 ```
-                         Internet
-                            │
-                 ┌──────────┴──────────┐
-                 │    Relay Layer       │
-                 └──────────┬──────────┘
-                            │
-           ┌────────────────┴────────────────┐
-           │                                 │
-   ┌───────┴────────┐              ┌─────────┴──────────┐
-   │ Cardano Stack  │              │ ApexFusion Stack    │
-   │                │              │                     │
-   │  mainnet       │              │  mainnet (afpm)     │
-   │  preprod       │              │  testnet (afpt)     │
-   │  preview       │              │                     │
-   │  guild         │              │                     │
-   └───────┬────────┘              └─────────┬───────────┘
-           │                                 │
-   ┌───────┴─────────────────────────────────┴───────────┐
-   │           Shared Platform Layer                      │
-   │                                                      │
-   │  • cardano-node (source-compiled from IntersectMBO)  │
-   │  • Guild Operators tooling (CNTools, gLiveView)      │
-   │  • Monitoring (Prometheus, EKG, nview, txtop)        │
-   │  • Mithril (client + signer)                         │
-   │  • CNCLI (leader logs, validation, PoolTool)         │
-   │  • Graceful shutdown (280s SIGINT drain)              │
-   │  • DB backup / restore                               │
-   │  • Multi-pool key management                         │
-   │                                                      │
-   │  Docker · Helm · K3s · debian:bookworm-slim          │
-   └──────────────────────────────────────────────────────┘
+                              Internet
+                                 │
+                      ┌──────────┴──────────┐
+                      │    Relay Layer       │
+                      └──────────┬──────────┘
+                                 │
+      ┌──────────────────────────┼──────────────────────────┐
+      │                          │                          │
+┌─────┴──────────┐    ┌─────────┴──────────┐    ┌──────────┴─────────┐
+│ Cardano Stack  │    │ ApexFusion Stack    │    │  Midnight Stack    │
+│                │    │                     │    │                    │
+│  mainnet       │    │  mainnet (afpm)     │    │  preview           │
+│  preprod       │    │  testnet (afpt)     │    │                    │
+│  preview       │    │                     │    │  midnight-node     │
+│  guild         │    │                     │    │  cardano companion │
+└───────┬────────┘    └─────────┬───────────┘    │  db-sync + ogmios │
+        │                       │                └──────────┬────────┘
+        │                       │                           │
+┌───────┴───────────────────────┴───────────────────────────┘
+│
+│  ┌──────────────────────────────────────────────────────────┐
+│  │      Shared Platform Layer (Cardano / ApexFusion)        │
+│  │                                                          │
+│  │  • cardano-node (source-compiled from IntersectMBO)      │
+│  │  • Guild Operators tooling (CNTools, gLiveView)          │
+│  │  • Monitoring (Prometheus, EKG, nview, txtop)            │
+│  │  • Mithril (client + signer)                             │
+│  │  • CNCLI (leader logs, validation, PoolTool)             │
+│  │  • Graceful shutdown (280s SIGINT drain)                  │
+│  │  • DB backup / restore                                   │
+│  │  • Multi-pool key management                             │
+│  │                                                          │
+│  │  Docker · Helm · K3s · debian:bookworm-slim              │
+│  └──────────────────────────────────────────────────────────┘
+│
+│  ┌──────────────────────────────────────────────────────────┐
+│  │      Midnight Stack (Substrate-based, own image)         │
+│  │                                                          │
+│  │  • midnight-node (Substrate/libp2p)                      │
+│  │  • Companion Cardano node + DB-Sync + Ogmios             │
+│  │  • Validator key insertion via RPC                        │
+│  │  • K3s manifests (no shared Docker image)                │
+│  └──────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────
 ```
 
 ---
@@ -111,13 +132,20 @@ Hybrid-Node/
 │   │   ├── configs/                #     mainnet, preprod, preview, guild
 │   │   └── k3s/                    #     bp.yaml, relay.yaml
 │   │
-│   └── apexfusion/                 #   ← ApexFusion chain
+│   ├── apexfusion/                 #   ← ApexFusion chain
+│   │   ├── README.md
+│   │   ├── configs/                #     afpm (mainnet), afpt (testnet)
+│   │   └── k3s/                    #     bp.yaml, relay.yaml, testnet-relay.yaml
+│   │
+│   └── midnight/                   #   ← Midnight chain (Substrate-based)
 │       ├── README.md
-│       ├── configs/                #     afpm (mainnet), afpt (testnet)
-│       └── k3s/                    #     bp.yaml, relay.yaml, testnet-relay.yaml
+│       ├── configs/                #     preview
+│       └── k3s/                    #     namespace.yaml, midnight-node.yaml,
+│                                   #     cardano-stack.yaml
 │
 ├── charts/                         # Helm charts
-│   └── hybrid-node/                #   Shared chart (network-selectable)
+│   ├── hybrid-node/                #   Shared chart (Cardano/ApexFusion)
+│   └── midnight/                   #   Midnight chart (placeholder)
 │
 ├── examples/                       # Example deployments
 │   ├── single-node/
@@ -180,7 +208,18 @@ docker run -d \
   ghcr.io/gvolcy/hybrid-node:latest
 ```
 
-### Kubernetes (K3s)
+### Midnight (K3s)
+
+```bash
+# Deploy the full Midnight stack (namespace + postgres + cardano companion + midnight node)
+kubectl apply -f chains/midnight/k3s/namespace.yaml
+kubectl apply -f chains/midnight/k3s/cardano-stack.yaml
+kubectl apply -f chains/midnight/k3s/midnight-node.yaml
+```
+
+> ⚠️ Midnight uses its own Substrate-based image (`midnightntwrk/midnight-node`) — it does **not** use the shared Hybrid-Node Docker image. See [chains/midnight/README.md](chains/midnight/README.md) for full setup including secrets and validator key configuration.
+
+### Kubernetes (K3s) — Cardano / ApexFusion
 
 ```bash
 # Cardano
@@ -287,6 +326,7 @@ docker buildx build -f platform/docker/Dockerfile \
 - [IntersectMBO](https://github.com/IntersectMBO/cardano-node) — cardano-node source
 - [ApexFusion / Scitz0](https://github.com/Scitz0/guild-operators-apex) — APEX Guild fork
 - [CoinCashew](https://www.coincashew.com/) — SPO best practices
+- [Midnight Network](https://midnight.network/) — Midnight node & documentation
 
 ## License
 
