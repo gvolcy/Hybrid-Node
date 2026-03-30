@@ -30,7 +30,9 @@ RUN echo "Building cardano-node ${NODE_VERSION}..." && \
     cabal build cardano-node && \
     mkdir -p /build/bin && \
     cp $(cabal list-bin cardano-node) /build/bin/ && \
-    strip /build/bin/cardano-node
+    cp $(cabal list-bin cardano-tracer) /build/bin/ 2>/dev/null || true && \
+    cp $(cabal list-bin cardano-submit-api) /build/bin/ 2>/dev/null || true && \
+    strip /build/bin/cardano-*
 
 # ============================================================================
 # Stage 2: Download pre-built companion tools
@@ -224,6 +226,7 @@ ENV NETWORK=mainnet \
     MITHRIL_SIGNER=N \
     CPU_CORES=2 \
     CNCLI_ENABLED=N \
+    START_AS_NON_PRODUCING=false \
     ENABLE_BACKUP=N \
     ENABLE_RESTORE=N \
     EKG_HOST=0.0.0.0 \

@@ -39,11 +39,13 @@ fi
 : "${UPDATE_CHECK:=N}"
 : "${CPU_CORES:=2}"
 # Always rebuild RTS_OPTS to use actual CPU_CORES (Dockerfile bakes -N2 default)
-RTS_OPTS="-N${CPU_CORES} -I0 -A16m -qg -qb --disable-delayed-os-memory-return"
+# -A64m: 64MB allocation area reduces GC pressure on mainnet (Blink Labs default)
+RTS_OPTS="-N${CPU_CORES} -I0 -A64m -qg -qb --disable-delayed-os-memory-return"
 : "${ENABLE_BACKUP:=N}"
 : "${ENABLE_RESTORE:=N}"
 : "${CNCLI_ENABLED:=N}"
 : "${CARDANO_BLOCK_PRODUCER:=false}"
+: "${START_AS_NON_PRODUCING:=false}"
 : "${EKG_HOST:=0.0.0.0}"
 : "${EKG_PORT:=12788}"
 : "${PROMETHEUS_HOST:=0.0.0.0}"
@@ -327,6 +329,18 @@ customise_configs() {
                 .TargetNumberOfRootPeers = $rc
             ' "${main_config}" > "${main_config}.tmp" && \
                 mv "${main_config}.tmp" "${main_config}"
+        fi
+
+        # Relay mode: enable PeerSharing so relays can discover and share peers
+        # BPs already have PeerSharing=false set above
+        if [ "${NODE_MODE}" != "bp" ]; then
+            local peer_sharing
+            peer_sharing=$(jq -r '.PeerSharing // empty' "${main_config}" 2>/dev/null)
+            if [ "${peer_sharing}" != "true" ]; then
+                log "Relay mode: Enabling PeerSharing for better peer discovery"
+                jq '.PeerSharing = true' "${main_config}" > "${main_config}.tmp" && \
+                    mv "${main_config}.tmp" "${main_config}"
+            fi
         fi
 
         # Use legacy tracing system for Guild Operators compatibility
@@ -710,8 +724,18 @@ mithril_bootstrap() {
         return
     fi
 
+
+    # Fetch ancillary verification key (required by newer mithril-client versions)
+    local ancillary_vkey=""
+    ancillary_vkey=$(curl -sS "${MITHRIL_AGGREGATOR}/epoch-settings" | jq -r '.ancillary_verification_key // empty' 2>/dev/null || true)
+    if [ -n "${ancillary_vkey}" ]; then
+        export ANCILLARY_VERIFICATION_KEY="${ancillary_vkey}"
+        log "Ancillary verification key loaded"
+    fi
+
     log "Downloading latest snapshot..."
-    mithril-client cardano-db download latest --download-dir "${DB_DIR}" || {
+    mithril-client cardano-db download latest --download-dir "${DB_DIR}" \
+        ${ancillary_vkey:+--include-ancillary} || {
         warn "Mithril download failed, node will sync from network"
     }
 }
@@ -938,6 +962,15 @@ build_node_cmd() {
             warn "Starting as relay-equivalent (no block production)"
             ls -la "${priv_pool}/" >&2 2>&1 || warn "Directory does not exist: ${priv_pool}"
         fi
+
+        # Dynamic block forging: start in non-producing mode, enable via SIGHUP
+        # This allows zero-downtime KES key rotation and failover:
+        #   Enable:  ensure key files exist, then: kill -SIGHUP <node-pid>
+        #   Disable: rename/remove key files, then: kill -SIGHUP <node-pid>
+        if [ "${START_AS_NON_PRODUCING}" = "true" ]; then
+            CMD="${CMD} --start-as-non-producing-node"
+            log "BP mode: Dynamic forging enabled (starting as non-producing, send SIGHUP to toggle)" >&2
+        fi
     fi
 
     echo "${CMD}"
@@ -1016,6 +1049,7 @@ if [ "${NODE_MODE}" = "bp" ]; then
     log "  CNCLI:      ${CNCLI_ENABLED}"
     log "  Mithril:    ${MITHRIL_SIGNER}"
     log "  PoolTool:   ${PT_API_KEY:+configured}${PT_API_KEY:-not set}"
+    log "  DynForging: ${START_AS_NON_PRODUCING}"
 fi
 if [ -n "${MEMPOOL_OVERRIDE}" ]; then
     log "  Mempool:    ${MEMPOOL_OVERRIDE}"
