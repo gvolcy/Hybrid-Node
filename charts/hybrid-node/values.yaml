@@ -69,7 +69,12 @@ podAnnotations: {}
 podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
-  fsGroup: 1000
+  # NOTE: Do NOT set fsGroup here. K8s recursively applies group permissions on
+  # every mount when fsGroup is set, which breaks cardano-node's VRF key
+  # permission check (GroupPermissionsExist error). Use fsGroupChangePolicy
+  # if you must set fsGroup.
+  # fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
 
 securityContext:
   capabilities:

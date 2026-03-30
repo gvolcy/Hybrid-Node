@@ -7,7 +7,7 @@
 set -eo pipefail
 
 # ----- Colors for output -----
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[hybrid-node]${NC} $*"; }
 warn() { echo -e "${YELLOW}[hybrid-node]${NC} WARN: $*" >&2; }
 err()  { echo -e "${RED}[hybrid-node]${NC} ERROR: $*" >&2; }
@@ -110,7 +110,7 @@ cleanup() {
 
         # Wait up to 280s for clean shutdown (checks for db/clean marker)
         local timeout=280
-        while kill -0 "${NODE_PID}" 2>/dev/null && [ $timeout -gt 0 ]; do
+        while kill -0 "${NODE_PID}" 2>/dev/null && [ "$timeout" -gt 0 ]; do
             if [ -f "${DB_DIR}/clean" ]; then
                 log "Clean shutdown confirmed (db/clean marker found)"
                 break
@@ -146,9 +146,10 @@ install_runtime_deps() {
 
     if [ "${need_install}" = true ]; then
         log "Installing runtime dependencies (e2fsprogs, sudo)..."
-        apt-get update -qq 2>/dev/null && \
-            apt-get install -y --no-install-recommends e2fsprogs sudo >/dev/null 2>&1 || \
+        if ! { apt-get update -qq 2>/dev/null && \
+               apt-get install -y --no-install-recommends e2fsprogs sudo >/dev/null 2>&1; }; then
             warn "Could not install e2fsprogs/sudo (running as non-root?)"
+        fi
 
         # Configure sudo for CNTools chattr support
         if command -v sudo &>/dev/null; then
@@ -204,7 +205,8 @@ check_genesis_hashes() {
 
     if [ -f "${byron_genesis}" ]; then
         byron_hash=$(cardano-cli byron genesis print-genesis-hash --genesis-json "${byron_genesis}" 2>/dev/null || true)
-        local byron_cfg=$(jq -r '.ByronGenesisHash // empty' "${config_file}" 2>/dev/null)
+        local byron_cfg
+        byron_cfg=$(jq -r '.ByronGenesisHash // empty' "${config_file}" 2>/dev/null)
         if [ -n "${byron_hash}" ] && [ "${byron_hash}" != "${byron_cfg}" ]; then
             warn "Byron genesis hash mismatch: config=${byron_cfg:0:16}... actual=${byron_hash:0:16}..."
             needs_fix=true
@@ -213,7 +215,8 @@ check_genesis_hashes() {
 
     if [ -f "${shelley_genesis}" ]; then
         shelley_hash=$(cardano-cli hash genesis-file --genesis "${shelley_genesis}" 2>/dev/null || true)
-        local shelley_cfg=$(jq -r '.ShelleyGenesisHash // empty' "${config_file}" 2>/dev/null)
+        local shelley_cfg
+        shelley_cfg=$(jq -r '.ShelleyGenesisHash // empty' "${config_file}" 2>/dev/null)
         if [ -n "${shelley_hash}" ] && [ "${shelley_hash}" != "${shelley_cfg}" ]; then
             warn "Shelley genesis hash mismatch: config=${shelley_cfg:0:16}... actual=${shelley_hash:0:16}..."
             needs_fix=true
@@ -222,7 +225,8 @@ check_genesis_hashes() {
 
     if [ -f "${alonzo_genesis}" ]; then
         alonzo_hash=$(cardano-cli hash genesis-file --genesis "${alonzo_genesis}" 2>/dev/null || true)
-        local alonzo_cfg=$(jq -r '.AlonzoGenesisHash // empty' "${config_file}" 2>/dev/null)
+        local alonzo_cfg
+        alonzo_cfg=$(jq -r '.AlonzoGenesisHash // empty' "${config_file}" 2>/dev/null)
         if [ -n "${alonzo_hash}" ] && [ "${alonzo_hash}" != "${alonzo_cfg}" ]; then
             warn "Alonzo genesis hash mismatch: config=${alonzo_cfg:0:16}... actual=${alonzo_hash:0:16}..."
             needs_fix=true
@@ -231,7 +235,8 @@ check_genesis_hashes() {
 
     if [ -f "${conway_genesis}" ]; then
         conway_hash=$(cardano-cli hash genesis-file --genesis "${conway_genesis}" 2>/dev/null || true)
-        local conway_cfg=$(jq -r '.ConwayGenesisHash // empty' "${config_file}" 2>/dev/null)
+        local conway_cfg
+        conway_cfg=$(jq -r '.ConwayGenesisHash // empty' "${config_file}" 2>/dev/null)
         if [ -n "${conway_hash}" ] && [ "${conway_hash}" != "${conway_cfg}" ]; then
             warn "Conway genesis hash mismatch: config=${conway_cfg:0:16}... actual=${conway_hash:0:16}..."
             needs_fix=true
@@ -433,8 +438,9 @@ customise_configs() {
 
     # Enable CHATTR in CNTools if available
     if [ -f "${CNODE_HOME}/scripts/cntools.sh" ]; then
-        grep -qi ENABLE_CHATTR "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null && \
+        if grep -qi ENABLE_CHATTR "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null; then
             sed -i 's/#ENABLE_CHATTR=false/ENABLE_CHATTR=true/g' "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null || true
+        fi
     fi
 }
 
@@ -469,12 +475,15 @@ configure_pool() {
     # Configure cncli.sh with pool information
     local cncli_script="${CNODE_HOME}/scripts/cncli.sh"
     if [ -f "${cncli_script}" ]; then
-        [ -n "${POOL_ID}" ] && \
+        if [ -n "${POOL_ID}" ]; then
             sed -i "s|POOL_ID=\".*\"|POOL_ID=\"${POOL_ID}\"|g" "${cncli_script}" 2>/dev/null || true
-        [ -n "${POOL_TICKER}" ] && \
+        fi
+        if [ -n "${POOL_TICKER}" ]; then
             sed -i "s|POOL_TICKER=\".*\"|POOL_TICKER=\"${POOL_TICKER}\"|g" "${cncli_script}" 2>/dev/null || true
-        [ -n "${PT_API_KEY}" ] && \
+        fi
+        if [ -n "${PT_API_KEY}" ]; then
             sed -i "s|PT_API_KEY=\".*\"|PT_API_KEY=\"${PT_API_KEY}\"|g" "${cncli_script}" 2>/dev/null || true
+        fi
     fi
 
     log "Pool configured: name=${POOL_NAME:-unset} ticker=${POOL_TICKER:-unset} id=${POOL_ID:0:16}..."
@@ -489,8 +498,10 @@ handle_backup_restore() {
     local backup_dir="${CNODE_HOME}/backup/${NETWORK}-db"
     mkdir -p "${backup_dir}"
 
-    local dbsize=$(du -s "${DB_DIR}" 2>/dev/null | awk '{print $1}')
-    local bksize=$(du -s "${backup_dir}" 2>/dev/null | awk '{print $1}')
+    local dbsize
+    dbsize=$(du -s "${DB_DIR}" 2>/dev/null | awk '{print $1}')
+    local bksize
+    bksize=$(du -s "${backup_dir}" 2>/dev/null | awk '{print $1}')
     dbsize=${dbsize:-0}
     bksize=${bksize:-0}
 
@@ -577,11 +588,9 @@ setup_network_configs() {
 
     # Download genesis files for the requested network (always refresh to ensure correct network)
     for genesis in byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json; do
-        if true; then
-            log "Downloading ${genesis} for ${NETWORK}..."
-            curl -sS -o "${CONFIG_DIR}/${genesis}" "${BASE_URL}/${genesis}" 2>/dev/null || \
-                warn "Could not download ${genesis} (may not exist for this network)"
-        fi
+        log "Downloading ${genesis} for ${NETWORK}..."
+        curl -sS -o "${CONFIG_DIR}/${genesis}" "${BASE_URL}/${genesis}" 2>/dev/null || \
+            warn "Could not download ${genesis} (may not exist for this network)"
     done
 
     # APEX networks also use a genesis.json (byron-genesis alias used by some tools)
@@ -671,7 +680,7 @@ mithril_bootstrap() {
         return
     fi
 
-    if [ -d "${DB_DIR}/immutable" ] && [ "$(ls -A "${DB_DIR}/immutable/" 2>/dev/null | wc -l)" -gt 0 ]; then
+    if [ -d "${DB_DIR}/immutable" ] && [ "$(find "${DB_DIR}/immutable/" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l)" -gt 0 ]; then
         log "Database already exists ($(du -sh "${DB_DIR}" | cut -f1)), skipping Mithril download"
         return
     fi
@@ -693,7 +702,8 @@ mithril_bootstrap() {
     esac
 
     export AGGREGATOR_ENDPOINT="${MITHRIL_AGGREGATOR}"
-    export GENESIS_VERIFICATION_KEY=$(curl -sS "${MITHRIL_AGGREGATOR}/epoch-settings" | jq -r '.protocol_parameters.genesis_verification_key // empty' 2>/dev/null || true)
+    GENESIS_VERIFICATION_KEY=$(curl -sS "${MITHRIL_AGGREGATOR}/epoch-settings" | jq -r '.protocol_parameters.genesis_verification_key // empty' 2>/dev/null || true)
+    export GENESIS_VERIFICATION_KEY
 
     if [ -z "${GENESIS_VERIFICATION_KEY}" ]; then
         warn "Could not fetch Mithril genesis verification key, skipping"
@@ -732,7 +742,7 @@ start_mithril_signer() {
         log "  [mithril] Node socket ready ✓"
 
         # Wait for node to be responsive
-        while ! timeout 10s cardano-cli query tip --socket-path "${CARDANO_NODE_SOCKET_PATH}" ${NETWORK_FLAG} >/dev/null 2>&1; do
+        while ! timeout 10s cardano-cli query tip --socket-path "${CARDANO_NODE_SOCKET_PATH}" "${NETWORK_FLAG}" >/dev/null 2>&1; do
             sleep 15
         done
         log "  [mithril] Node responding to queries ✓"
@@ -740,7 +750,7 @@ start_mithril_signer() {
         # Wait for reasonable sync progress (>90%)
         while true; do
             local sync
-            sync=$(timeout 10s cardano-cli query tip --socket-path "${CARDANO_NODE_SOCKET_PATH}" ${NETWORK_FLAG} 2>/dev/null | jq -r '.syncProgress // "0"' | sed 's/%//' || echo "0")
+            sync=$(timeout 10s cardano-cli query tip --socket-path "${CARDANO_NODE_SOCKET_PATH}" "${NETWORK_FLAG}" 2>/dev/null | jq -r '.syncProgress // "0"' | sed 's/%//' || echo "0")
             if [ -n "${sync}" ] && [ "$(echo "${sync} > 90" | bc -l 2>/dev/null || echo 0)" -eq 1 ]; then
                 log "  [mithril] Sync progress: ${sync}% ✓"
                 break
@@ -1041,7 +1051,7 @@ NODE_CMD=$(build_node_cmd)
 log "Starting: ${NODE_CMD}"
 
 # 9. Launch cardano-node
-eval ${NODE_CMD} &
+eval "${NODE_CMD}" &
 NODE_PID=$!
 log "cardano-node started (PID ${NODE_PID})"
 

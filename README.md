@@ -7,6 +7,10 @@
 
 Hybrid-Node is an operator-focused deployment framework for running Cardano and ApexFusion blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular, production-friendly deployment workflows for relay and block producer environments.
 
+## Why This Exists
+
+Running a stake pool shouldn't require stitching together five different repos, hand-editing config files, and hoping your topology doesn't leak your BP to the public internet. Hybrid-Node consolidates the entire SPO toolchain — source-built `cardano-node`, Guild Operators scripts, Mithril, CNCLI, monitoring — into a single, version-pinned Docker image with a battle-tested entrypoint that handles config precedence, genesis hash verification, P2P peer hardening, graceful shutdown, and multi-pool key management out of the box. One image. Any chain. Any network. Deploy in seconds.
+
 > 🟢 **Production-validated** — Running across 15 nodes: Cardano mainnet (VOLCY & SILEM stake pools) and ApexFusion Vector (AFPM/AFPT) networks.
 
 ---

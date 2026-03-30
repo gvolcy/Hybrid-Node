@@ -3,7 +3,7 @@ name: hybrid-node
 description: Hybrid Cardano Node - Guild Operators + Blink Labs for K3s
 type: application
 version: 0.1.0
-appVersion: "10.6.2"
+appVersion: "10.1.4"
 keywords:
   - cardano
   - blockchain
