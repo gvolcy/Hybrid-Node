@@ -1,0 +1,127 @@
+name: Integration Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'platform/docker/Dockerfile'
+      - 'bin/**'
+      - 'platform/bin/**'
+      - 'chains/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'platform/docker/Dockerfile'
+      - 'bin/**'
+      - 'platform/bin/**'
+      - 'chains/**'
+      - '.github/workflows/test.yml'
+  workflow_dispatch:
+
+env:
+  TEST_IMAGE: hybrid-node-test:ci
+
+jobs:
+  build-and-test:
+    name: Build & Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: platform/docker/Dockerfile
+          load: true
+          tags: ${{ env.TEST_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image metadata
+        run: |
+          echo "### Image Inspection" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          docker inspect "$TEST_IMAGE" --format '{{.Config.Healthcheck}}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # Verify HEALTHCHECK is configured
+          HC=$(docker inspect "$TEST_IMAGE" --format '{{.Config.Healthcheck.Test}}')
+          if [ -z "$HC" ] || [ "$HC" = "<nil>" ]; then
+            echo "::error::HEALTHCHECK not configured in image"
+            exit 1
+          fi
+          echo "✅ HEALTHCHECK configured: $HC"
+
+      - name: Verify entrypoint exists
+        run: |
+          docker run --rm --entrypoint cat "$TEST_IMAGE" /usr/local/bin/entrypoint.sh > /dev/null
+          echo "✅ entrypoint.sh present"
+
+      - name: Verify healthcheck script exists
+        run: |
+          docker run --rm --entrypoint cat "$TEST_IMAGE" /usr/local/bin/healthcheck.sh > /dev/null
+          echo "✅ healthcheck.sh present"
+
+      - name: Verify cardano-cli available
+        run: |
+          VERSION=$(docker run --rm --entrypoint cardano-cli "$TEST_IMAGE" version 2>&1 | head -1)
+          echo "✅ cardano-cli: $VERSION"
+
+      - name: Verify cardano-node available
+        run: |
+          VERSION=$(docker run --rm --entrypoint cardano-node "$TEST_IMAGE" version 2>&1 | head -1)
+          echo "✅ cardano-node: $VERSION"
+
+      - name: Smoke test - relay startup
+        run: |
+          echo "Starting relay node container..."
+          docker run -d --name test-relay \
+            -e NETWORK=preprod \
+            -e NODE_MODE=relay \
+            -e MITHRIL_DOWNLOAD=N \
+            "$TEST_IMAGE"
+
+          # Give the node time to initialize
+          echo "Waiting 60s for node initialization..."
+          sleep 60
+
+          # Check container is still running
+          STATE=$(docker inspect test-relay --format '{{.State.Status}}')
+          if [ "$STATE" != "running" ]; then
+            echo "::error::Container exited unexpectedly"
+            docker logs test-relay
+            exit 1
+          fi
+          echo "✅ Container running after 60s"
+
+          # Check logs for startup indicators
+          docker logs test-relay 2>&1 | tail -30
+
+          echo "### Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Container running | ✅ |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f test-relay 2>/dev/null || true
+
+  shellcheck-healthcheck:
+    name: ShellCheck healthcheck.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Lint healthcheck.sh
+        run: shellcheck -x -s bash bin/healthcheck.sh

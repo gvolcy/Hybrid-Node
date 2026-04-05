@@ -3,7 +3,8 @@
 **Multi-chain node deployment framework for Cardano, ApexFusion, and Midnight using Docker, Helm, and K3s.**
 
 [![Lint](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml)
-[![Build and Push](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
+[![Build](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
+[![Test](https://github.com/gvolcy/Hybrid-Node/actions/workflows/test.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Hybrid-Node is an operator-focused deployment framework for running Cardano, ApexFusion, and Midnight blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular, production-friendly deployment workflows for relay and block producer environments.

@@ -210,6 +210,9 @@ RUN for script in mithril-client.sh mithril-signer.sh mithril-relay.sh; do \
 COPY platform/bin/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+COPY platform/bin/healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
 # Copy chain-specific config overrides into a flat hybrid-configs/<network>/ layout
 COPY chains/cardano/configs/    ${CNODE_HOME}/hybrid-configs/
 COPY chains/apexfusion/configs/ ${CNODE_HOME}/hybrid-configs/
@@ -241,9 +244,9 @@ EXPOSE 6000 12798 12788 9090
 VOLUME ["${CNODE_HOME}/db", "${CNODE_HOME}/priv", "${CNODE_HOME}/logs", \
         "${CNODE_HOME}/guild-db", "${CNODE_HOME}/sockets", "${CNODE_HOME}/mithril"]
 
-# Healthcheck via socket test (faster than cardano-cli query)
+# Healthcheck: socket + tip query + sync progress
 HEALTHCHECK --interval=60s --timeout=10s --start-period=600s --retries=3 \
-    CMD test -S ${CARDANO_NODE_SOCKET_PATH} || exit 1
+    CMD ["/usr/local/bin/healthcheck.sh"]
 
 USER guild
 WORKDIR ${CNODE_HOME}
