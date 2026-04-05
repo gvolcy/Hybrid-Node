@@ -1,0 +1,64 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.sh'
+      - '.github/workflows/lint.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.sh'
+      - '.github/workflows/lint.yml'
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck on entrypoint
+        run: |
+          shellcheck -x -s bash \
+            -e SC2034 -e SC2317 \
+            bin/entrypoint.sh
+
+      - name: Run ShellCheck on all shell scripts
+        run: |
+          find . -name '*.sh' -type f | while read -r f; do
+            echo "Checking: $f"
+            shellcheck -x -s bash -S warning "$f" || true
+          done
+
+  yaml-lint:
+    name: YAML Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Lint K3s manifests
+        run: |
+          find chains/ -name '*.yaml' -o -name '*.yml' | while read -r f; do
+            echo "Checking: $f"
+            yamllint -d relaxed "$f" || true
+          done
+
+  dockerfile-lint:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: platform/docker/Dockerfile
+          failure-threshold: warning

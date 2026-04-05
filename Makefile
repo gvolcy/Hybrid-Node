@@ -76,3 +76,55 @@ helm-bp: ## Deploy BP via Helm
 	helm install cardano-bp ./charts/hybrid-node \
 	--set cardano.mode=bp \
 	--set cardano.network=mainnet
+
+# ============================================================================
+# Lint & Quality
+# ============================================================================
+
+lint: ## Run ShellCheck on all shell scripts
+shellcheck -x -s bash bin/entrypoint.sh
+@echo "✅ ShellCheck passed"
+
+lint-yaml: ## Lint YAML manifests
+find chains/ -name '*.yaml' -o -name '*.yml' | xargs yamllint -d relaxed
+@echo "✅ YAML lint passed"
+
+lint-docker: ## Lint Dockerfile with hadolint
+hadolint platform/docker/Dockerfile
+@echo "✅ Dockerfile lint passed"
+
+lint-all: lint lint-yaml lint-docker ## Run all linters
+
+# ============================================================================
+# Chain-specific builds
+# ============================================================================
+
+build-cardano: ## Build for Cardano (node 10.7.0)
+docker build -f platform/docker/Dockerfile \
+--build-arg NODE_VERSION=10.7.0 \
+--build-arg CLI_VERSION=10.15.1.0 \
+--build-arg G_ACCOUNT=cardano-community \
+--build-arg GUILD_DEPLOY_BRANCH=master \
+-t $(IMAGE_NAME):10.7.0-cardano .
+
+build-apex: ## Build for ApexFusion (node 10.1.4)
+docker build -f platform/docker/Dockerfile \
+--build-arg NODE_VERSION=10.1.4 \
+--build-arg CLI_VERSION=9.4.1.0 \
+--build-arg G_ACCOUNT=Scitz0 \
+--build-arg GUILD_DEPLOY_BRANCH=main \
+--build-arg GUILD_REPO=guild-operators-apex \
+-t $(IMAGE_NAME):10.1.4-apexfusion .
+
+# ============================================================================
+# Operations
+# ============================================================================
+
+logs: ## Tail relay container logs
+docker logs -f hybrid-relay 2>&1 | tail -100
+
+logs-bp: ## Tail BP container logs
+docker logs -f hybrid-bp 2>&1 | tail -100
+
+status: ## Show running Hybrid-Node containers
+@docker ps --filter "ancestor=$(IMAGE_NAME)" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
