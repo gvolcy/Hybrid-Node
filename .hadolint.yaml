@@ -1,0 +1,16 @@
+# Hadolint configuration for Hybrid-Node
+# These warnings are acknowledged but acceptable for our multi-stage build
+ignored:
+  # apt-get version pinning — we use latest from the base image's repos
+  # and pin at the cardano-node/cli level instead
+  - DL3008
+  # "Use WORKDIR" — our cd is inside a complex RUN chain
+  - DL3003
+  # "Set SHELL -o pipefail" — our RUN commands handle errors explicitly
+  - DL4006
+
+# ShellCheck rules to ignore within Dockerfile RUN commands
+override:
+  warning:
+    # Brace expansion is intentional (bash, not POSIX sh)
+    - SC3009

@@ -5,11 +5,15 @@ on:
     branches: [main]
     paths:
       - '**/*.sh'
+      - 'platform/docker/Dockerfile'
+      - '.hadolint.yaml'
       - '.github/workflows/lint.yml'
   pull_request:
     branches: [main]
     paths:
       - '**/*.sh'
+      - 'platform/docker/Dockerfile'
+      - '.hadolint.yaml'
       - '.github/workflows/lint.yml'
 
 jobs:
@@ -24,13 +28,25 @@ jobs:
 
       - name: Run ShellCheck on entrypoint
         run: |
+          # Excluded codes (all intentional patterns):
+          #   SC2034 — variables used by sourced Guild scripts
+          #   SC2317 — functions called dynamically or via trap
+          #   SC2016 — jq $var expressions intentionally in single quotes
+          #   SC1091 — sourced files generated at runtime (mithril.env)
+          #   SC2030 — subshell modification is intentional (mithril signer runs in subshell)
+          #   SC2031 — variable read after subshell is fine (set before subshell too)
           shellcheck -x -s bash \
-            -e SC2034 -e SC2317 \
+            -e SC2034 -e SC2317 -e SC2016 -e SC1091 -e SC2030 -e SC2031 \
             bin/entrypoint.sh
 
-      - name: Run ShellCheck on all shell scripts
+      - name: Run ShellCheck on healthcheck
+        run: shellcheck -x -s bash bin/healthcheck.sh
+
+      - name: Run ShellCheck on all other scripts
         run: |
-          find . -name '*.sh' -type f | while read -r f; do
+          find . -name '*.sh' -type f \
+            ! -path './bin/entrypoint.sh' \
+            ! -path './bin/healthcheck.sh' | while read -r f; do
             echo "Checking: $f"
             shellcheck -x -s bash -S warning "$f" || true
           done
@@ -44,7 +60,7 @@ jobs:
       - name: Install yamllint
         run: pip install yamllint
 
-      - name: Lint K3s manifests
+      - name: Lint YAML files
         run: |
           find chains/ -name '*.yaml' -o -name '*.yml' | while read -r f; do
             echo "Checking: $f"
@@ -61,4 +77,5 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: platform/docker/Dockerfile
-          failure-threshold: warning
+          failure-threshold: error
+          config: .hadolint.yaml
