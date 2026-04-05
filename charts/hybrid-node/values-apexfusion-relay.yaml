@@ -1,0 +1,37 @@
+# Example: ApexFusion Prime Mainnet Relay Node
+# Usage: helm install apex-relay ./charts/hybrid-node -f charts/hybrid-node/values-apexfusion-relay.yaml
+#
+# NOTE: ApexFusion uses the same cardano-node binary but with its own genesis/configs
+#       Mithril is NOT available for ApexFusion — node syncs from network peers
+
+image:
+  repository: ghcr.io/gvolcy/hybrid-node
+  tag: "apexfusion-10.1.4"
+
+cardano:
+  network: afpm            # ApexFusion Prime Mainnet (Vector chain)
+  mode: relay
+  port: 6000
+  cpuCores: 2
+  mithrilDownload: "N"     # Mithril not available for ApexFusion
+  customPeers: ""
+
+resources:
+  requests:
+    memory: "4Gi"
+    cpu: "2"
+  limits:
+    memory: "8Gi"
+    cpu: "4"
+
+persistence:
+  db:
+    enabled: true
+    size: 50Gi
+
+service:
+  type: NodePort
+  port: 6000
+
+metrics:
+  enabled: true

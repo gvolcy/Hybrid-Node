@@ -24,8 +24,16 @@ jobs:
           extra_args: --only-verified
 
   dockerfile-scan:
-    name: Container Security
+    name: Container Security (${{ matrix.chain }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chain: [cardano, apexfusion]
+        include:
+          - chain: cardano
+            dockerfile: platform/docker/Dockerfile.cardano
+          - chain: apexfusion
+            dockerfile: platform/docker/Dockerfile.apexfusion
     steps:
       - uses: actions/checkout@v4
 
@@ -33,17 +41,18 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'config'
-          scan-ref: 'platform/docker/Dockerfile'
+          scan-ref: ${{ matrix.dockerfile }}
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
           format: 'sarif'
-          output: 'trivy-results.sarif'
+          output: 'trivy-${{ matrix.chain }}.sarif'
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: 'trivy-${{ matrix.chain }}.sarif'
+          category: ${{ matrix.chain }}
 
   helm-scan:
     name: Helm Chart Security

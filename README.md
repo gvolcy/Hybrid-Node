@@ -1,6 +1,7 @@
 # 🔀 Hybrid-Node
 
-**Multi-chain node deployment framework for Cardano, ApexFusion, and Midnight using Docker, Helm, and K3s.**
+**Multi-chain node deployment framework for Cardano, ApexFusion, and Midnight using Docker,
+Helm, and K3s.**
 
 [![Lint](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml)
 [![Build](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/build.yml)
@@ -8,13 +9,56 @@
 [![Security](https://github.com/gvolcy/Hybrid-Node/actions/workflows/security.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Hybrid-Node is an operator-focused deployment framework for running Cardano, ApexFusion, and Midnight blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular, production-friendly deployment workflows for relay and block producer environments.
+Hybrid-Node is an operator-focused deployment framework for running Cardano, ApexFusion, and
+Midnight blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular,
+production-friendly deployment workflows for relay and block producer environments.
 
 ## Why This Exists
 
-Running a stake pool shouldn't require stitching together five different repos, hand-editing config files, and hoping your topology doesn't leak your BP to the public internet. Hybrid-Node consolidates the entire SPO toolchain — source-built `cardano-node`, Guild Operators scripts, Mithril, CNCLI, monitoring — into a single, version-pinned Docker image with a battle-tested entrypoint that handles config precedence, genesis hash verification, P2P peer hardening, graceful shutdown, and multi-pool key management out of the box. One image. Any chain. Any network. Deploy in seconds.
+Running a stake pool shouldn't require stitching together five different repos, hand-editing
+config files, and hoping your topology doesn't leak your BP to the public internet. Hybrid-Node
+consolidates the entire SPO toolchain — source-built `cardano-node`, Guild Operators scripts,
+Mithril, CNCLI, monitoring — into a single, version-pinned Docker image with a battle-tested
+entrypoint that handles config precedence, genesis hash verification, P2P peer hardening,
+graceful shutdown, and multi-pool key management out of the box. One image per chain. Any network.
+Deploy in seconds.
 
-> 🟢 **Production-validated** — Running across 17 nodes: Cardano mainnet (VOLCY & SILEM stake pools), ApexFusion Vector (AFPM/AFPT), and Midnight Preview networks.
+> 🟢 **Production-validated** — Running across 17 nodes: Cardano mainnet (VOLCY & SILEM stake
+> pools), ApexFusion Vector (AFPM/AFPT), and Midnight Preview networks.
+
+---
+
+## Chain Separation
+
+Hybrid-Node builds **separate Docker images** for each chain. Each chain has its own Dockerfile,
+version pins, and image tags — there is no ambiguous `latest` tag.
+
+| Chain | Dockerfile | Node Version | Image Tag |
+|-------|-----------|--------------|-----------|
+| **Cardano** | `platform/docker/Dockerfile.cardano` | 10.6.3 | `ghcr.io/gvolcy/hybrid-node:cardano-10.6.3` |
+| **ApexFusion** | `platform/docker/Dockerfile.apexfusion` | 10.1.4 | `ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4` |
+| **Midnight** | Pre-built upstream image | 0.22.3 | `midnightntwrk/midnight-node:0.22.3` |
+
+Version pins for each chain live in `chains/<chain>/versions.env`:
+
+```bash
+# chains/cardano/versions.env
+NODE_VERSION=10.6.3
+CLI_VERSION=10.15.1.0
+G_ACCOUNT=cardano-community
+GUILD_REPO=guild-operators
+GUILD_DEPLOY_BRANCH=master
+
+# chains/apexfusion/versions.env
+NODE_VERSION=10.1.4
+CLI_VERSION=9.4.1.0
+G_ACCOUNT=Scitz0
+GUILD_REPO=guild-operators-apex
+GUILD_DEPLOY_BRANCH=main
+```
+
+> ⚠️ **ApexFusion uses an older cardano-node version** — do NOT bump it to match Cardano without
+> confirming compatibility with the [ApexFusion prime-docker repo](https://github.com/APN-Fusion/prime-docker).
 
 ---
 
@@ -44,20 +88,22 @@ Running a stake pool shouldn't require stitching together five different repos, 
 
 > ⚠️ Midnight uses its own Substrate-based node image — it does **not** use the shared Hybrid-Node Docker image.
 
-> �� Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md) · [Midnight](chains/midnight/README.md)
+> 📖 Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md) · [Midnight](chains/midnight/README.md)
 
 ---
 
 ## Shared vs Isolated
 
-Hybrid-Node uses a **shared platform** with **isolated chain configs**. Everything that is common across chains lives in one place; everything chain-specific lives under its own directory.
+Hybrid-Node uses a **shared platform** with **isolated chain configs**. Everything that is common
+across chains lives in one place; everything chain-specific lives under its own directory.
 
 | Layer | What | Where |
 |-------|------|-------|
-| **Shared** | Docker image, entrypoint, Helm chart, monitoring, shutdown logic | `platform/`, `charts/hybrid-node/` |
-| **Isolated** | Genesis files, topology, network configs, K3s manifests | `chains/cardano/`, `chains/apexfusion/`, `chains/midnight/` |
+| **Shared** | Entrypoint, healthcheck, Helm chart, monitoring, shutdown logic | `platform/bin/`, `charts/hybrid-node/` |
+| **Per-Chain** | Dockerfile, version pins, genesis files, topology, network configs, K3s manifests | `platform/docker/Dockerfile.<chain>`, `chains/<chain>/` |
 
-The `NETWORK` environment variable selects which chain and network to run at container startup — the same image handles all of them.
+Each chain has its own Dockerfile that sources the appropriate Guild Operators fork and
+network configurations at build time.
 
 ---
 
@@ -118,54 +164,88 @@ The `NETWORK` environment variable selects which chain and network to run at con
 Hybrid-Node/
 ├── README.md
 ├── LICENSE
+├── Makefile                        # Chain-aware build targets
 │
 ├── docs/                           # Documentation
 │   ├── architecture.md             #   System design & runtime flow
 │   └── deployment.md               #   Full deployment guide
 │
-├── platform/                       # Shared infrastructure (all chains)
+├── platform/                       # Shared infrastructure
 │   ├── docker/
-│   │   └── Dockerfile              #   Multi-stage build
+│   │   ├── Dockerfile.cardano      #   Cardano multi-stage build
+│   │   └── Dockerfile.apexfusion   #   ApexFusion multi-stage build
 │   └── bin/
-│       └── entrypoint.sh           #   Unified entrypoint (1000+ lines)
+│       ├── entrypoint.sh           #   Unified entrypoint (1000+ lines)
+│       └── healthcheck.sh          #   Container health check
 │
 ├── chains/                         # Chain-specific modules
 │   ├── cardano/                    #   ← Cardano chain
 │   │   ├── README.md
+│   │   ├── versions.env            #     Pinned versions (node, cli, guild)
 │   │   ├── configs/                #     mainnet, preprod, preview, guild
 │   │   └── k3s/                    #     bp.yaml, relay.yaml
 │   │
 │   ├── apexfusion/                 #   ← ApexFusion chain
 │   │   ├── README.md
+│   │   ├── versions.env            #     Pinned versions (node, cli, guild)
 │   │   ├── configs/                #     afpm (mainnet), afpt (testnet)
 │   │   └── k3s/                    #     bp.yaml, relay.yaml, testnet-relay.yaml
 │   │
 │   └── midnight/                   #   ← Midnight chain (Substrate-based)
 │       ├── README.md
+│       ├── versions.env            #     Pre-built image version
 │       ├── configs/                #     preview
 │       └── k3s/                    #     namespace.yaml, midnight-node.yaml,
 │                                   #     cardano-stack.yaml
 │
 ├── charts/                         # Helm charts
 │   ├── hybrid-node/                #   Shared chart (Cardano/ApexFusion)
+│   │   ├── values-relay-example.yaml
+│   │   ├── values-bp-example.yaml
+│   │   ├── values-apexfusion-relay.yaml
+│   │   └── values-apexfusion-bp.yaml
 │   └── midnight/                   #   Midnight chart (placeholder)
 │
 ├── examples/                       # Example deployments
 │   ├── single-node/
 │   └── production/
 │
-└── .github/workflows/              # CI/CD
-    └── build.yml
+└── .github/workflows/              # CI/CD (matrix: cardano × apexfusion)
+    ├── build.yml
+    ├── test.yml
+    ├── release.yml
+    ├── lint.yml
+    └── security.yml
 ```
 
 ---
 
 ## Quick Start
 
-### Pull the image
+### Build
 
 ```bash
-docker pull ghcr.io/gvolcy/hybrid-node:latest
+# Build Cardano image (default)
+make build
+
+# Build ApexFusion image
+make build-apexfusion
+
+# Build both
+make build-all
+
+# See all available targets
+make help
+```
+
+### Pull pre-built images
+
+```bash
+# Cardano
+docker pull ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+
+# ApexFusion
+docker pull ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
 ```
 
 ### Cardano Relay
@@ -178,7 +258,7 @@ docker run -d \
   -e NODE_PORT=3001 \
   -v cardano-db:/opt/cardano/cnode/db \
   -p 3001:3001 \
-  ghcr.io/gvolcy/hybrid-node:latest
+  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
 ```
 
 ### Cardano Block Producer
@@ -195,7 +275,7 @@ docker run -d \
   -v cardano-db:/opt/cardano/cnode/db \
   -v cardano-keys:/opt/cardano/cnode/priv \
   -p 6000:6000 \
-  ghcr.io/gvolcy/hybrid-node:latest
+  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
 ```
 
 ### ApexFusion Relay
@@ -208,7 +288,7 @@ docker run -d \
   -e NODE_PORT=4550 \
   -v apex-db:/opt/cardano/cnode/db \
   -p 4550:4550 \
-  ghcr.io/gvolcy/hybrid-node:latest
+  ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
 ```
 
 ### Midnight (K3s)
@@ -220,7 +300,9 @@ kubectl apply -f chains/midnight/k3s/cardano-stack.yaml
 kubectl apply -f chains/midnight/k3s/midnight-node.yaml
 ```
 
-> ⚠️ Midnight uses its own Substrate-based image (`midnightntwrk/midnight-node`) — it does **not** use the shared Hybrid-Node Docker image. See [chains/midnight/README.md](chains/midnight/README.md) for full setup including secrets and validator key configuration.
+> ⚠️ Midnight uses its own Substrate-based image (`midnightntwrk/midnight-node`) — it does **not**
+> use the shared Hybrid-Node Docker image. See [chains/midnight/README.md](chains/midnight/README.md)
+> for full setup including secrets and validator key configuration.
 
 ### Kubernetes (K3s) — Cardano / ApexFusion
 
@@ -231,13 +313,55 @@ kubectl apply -f chains/cardano/k3s/relay.yaml
 # ApexFusion
 kubectl apply -f chains/apexfusion/k3s/relay.yaml
 
-# Helm
+# Helm — Cardano relay
 helm install cardano-relay ./charts/hybrid-node \
-  --set cardano.network=mainnet \
-  --set cardano.mode=relay
+  -f charts/hybrid-node/values-relay-example.yaml
+
+# Helm — ApexFusion relay
+helm install apex-relay ./charts/hybrid-node \
+  -f charts/hybrid-node/values-apexfusion-relay.yaml
 ```
 
-> 📖 See [docs/deployment.md](docs/deployment.md) for full deployment guide including BP setup, volume mounts, and monitoring.
+> 📖 See [docs/deployment.md](docs/deployment.md) for full deployment guide including BP setup,
+> volume mounts, and monitoring.
+
+---
+
+## Makefile Targets
+
+```
+make build              Build Docker image (CHAIN=cardano by default)
+make build-cardano      Build Cardano image
+make build-apexfusion   Build ApexFusion image
+make build-all          Build all chain images
+make push               Push image to registry
+make push-all           Push all chain images
+make run-relay          Run relay container
+make run-bp             Run block producer container
+make shell              Open shell in container
+make version            Show current chain version
+make versions           Show all chain versions
+make clean              Remove images for current chain
+make clean-all          Remove all chain images
+make helm-relay         Deploy relay via Helm
+make helm-bp            Deploy BP via Helm
+make lint               Run all linters
+make lint-yaml          Lint YAML files
+make lint-docker        Lint Dockerfiles
+make lint-all           Full lint suite
+make logs               Tail relay logs
+make logs-bp            Tail BP logs
+make status             Show running containers
+make help               Show this help
+```
+
+Override the chain with `CHAIN=`:
+
+```bash
+make build CHAIN=apexfusion
+make run-relay CHAIN=apexfusion
+make push CHAIN=apexfusion
+```
 
 ---
 
@@ -287,18 +411,19 @@ helm install cardano-relay ./charts/hybrid-node \
 | `nview` | [blinklabs-io/nview](https://github.com/blinklabs-io/nview) | TUI node monitor |
 | `txtop` | [blinklabs-io/txtop](https://github.com/blinklabs-io/txtop) | Mempool transaction display |
 
-> 📦 See the upstream [cardano-node releases](https://github.com/IntersectMBO/cardano-node/releases) for the latest version information, system requirements, and compatibility matrix.
+> 📦 See the upstream [cardano-node releases](https://github.com/IntersectMBO/cardano-node/releases)
+> for the latest version information, system requirements, and compatibility matrix.
 
 ---
 
 ## Design Goals
 
-- 🧩 **Modular chain separation** — each chain has its own configs, manifests, and docs
+- 🧩 **Modular chain separation** — each chain has its own Dockerfile, version pins, and configs
 - ☸️ **Kubernetes-native** — Helm charts and K3s manifests for production deployments
 - 🛠️ **Operator-focused tooling** — CNTools, gLiveView, CNCLI, Mithril, nview, txtop
 - 💾 **Persistent storage & recovery** — DB backup/restore, graceful 280s shutdown
 - 🔒 **Relay / BP separation** — locked-down BP topology, NetworkPolicy support
-- 📦 **Reproducible builds** — every component version is explicit and pinned
+- 📦 **Reproducible builds** — every component version is explicit and pinned per chain
 - 🏗️ **Multi-arch** — AMD64 and ARM64 support
 
 ---
@@ -306,18 +431,29 @@ helm install cardano-relay ./charts/hybrid-node \
 ## Building
 
 ```bash
-# Default build
-docker build -f platform/docker/Dockerfile -t hybrid-node:latest .
+# Cardano (default)
+make build
 
-# Specific node version
-docker build -f platform/docker/Dockerfile \
-  --build-arg NODE_VERSION=10.7.0 \
-  -t hybrid-node:10.7.0 .
+# ApexFusion
+make build-apexfusion
 
-# Multi-arch
-docker buildx build -f platform/docker/Dockerfile \
+# Both chains
+make build-all
+
+# Manual Docker build with version override
+docker build -f platform/docker/Dockerfile.cardano \
+  --build-arg NODE_VERSION=10.6.3 \
+  -t hybrid-node:cardano-10.6.3 .
+
+# Multi-arch Cardano
+docker buildx build -f platform/docker/Dockerfile.cardano \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/gvolcy/hybrid-node:latest --push .
+  -t ghcr.io/gvolcy/hybrid-node:cardano-10.6.3 --push .
+
+# Multi-arch ApexFusion
+docker buildx build -f platform/docker/Dockerfile.apexfusion \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4 --push .
 ```
 
 ---

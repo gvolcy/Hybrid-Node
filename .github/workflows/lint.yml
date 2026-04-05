@@ -5,14 +5,14 @@ on:
     branches: [main]
     paths:
       - '**/*.sh'
-      - 'platform/docker/Dockerfile'
+      - 'platform/docker/Dockerfile*'
       - '.hadolint.yaml'
       - '.github/workflows/lint.yml'
   pull_request:
     branches: [main]
     paths:
       - '**/*.sh'
-      - 'platform/docker/Dockerfile'
+      - 'platform/docker/Dockerfile*'
       - '.hadolint.yaml'
       - '.github/workflows/lint.yml'
 
@@ -62,7 +62,7 @@ jobs:
 
       - name: Lint YAML files
         run: |
-          find chains/ -name '*.yaml' -o -name '*.yml' | while read -r f; do
+          find chains/ charts/ -name '*.yaml' -o -name '*.yml' | while read -r f; do
             echo "Checking: $f"
             yamllint -d relaxed "$f" || true
           done
@@ -70,12 +70,17 @@ jobs:
   dockerfile-lint:
     name: Dockerfile Lint
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dockerfile:
+          - platform/docker/Dockerfile.cardano
+          - platform/docker/Dockerfile.apexfusion
     steps:
       - uses: actions/checkout@v4
 
-      - name: Lint Dockerfile
+      - name: Lint ${{ matrix.dockerfile }}
         uses: hadolint/hadolint-action@v3.1.0
         with:
-          dockerfile: platform/docker/Dockerfile
+          dockerfile: ${{ matrix.dockerfile }}
           failure-threshold: error
           config: .hadolint.yaml

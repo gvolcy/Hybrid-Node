@@ -6,8 +6,15 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      chain:
+        description: 'Target chain'
+        required: true
+        type: choice
+        options:
+          - cardano
+          - apexfusion
       tag:
-        description: 'Release tag (e.g., v10.7.0-cardano)'
+        description: 'Release tag (e.g., v10.6.3-cardano)'
         required: true
 
 env:
@@ -16,7 +23,7 @@ env:
 
 jobs:
   release:
-    name: Create Release
+    name: Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -27,70 +34,94 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine tag
+      - name: Determine tag and chain
         id: tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.tag }}"
+            CHAIN="${{ github.event.inputs.chain }}"
           else
             TAG="${GITHUB_REF#refs/tags/}"
+            # Parse chain from tag: v10.6.3-cardano → cardano
+            CHAIN=$(echo "$TAG" | sed 's/^v//' | sed 's/^[0-9.]*-//')
+            [ -z "$CHAIN" ] && CHAIN="cardano"
           fi
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Release tag: ${TAG}"
 
-      - name: Parse version info
-        id: version
-        run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-          # Extract version and chain from tag like v10.7.0-cardano or v10.1.4-apexfusion
           VERSION=$(echo "$TAG" | sed 's/^v//' | cut -d'-' -f1)
-          CHAIN=$(echo "$TAG" | sed 's/^v//' | cut -d'-' -f2-)
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "chain=${CHAIN:-cardano}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}, Chain: ${CHAIN:-cardano}"
+          echo "chain=${CHAIN}" >> $GITHUB_OUTPUT
+          echo "Release: ${TAG} (chain=${CHAIN}, version=${VERSION})"
+
+      - name: Set chain-specific parameters
+        id: params
+        run: |
+          CHAIN="${{ steps.tag.outputs.chain }}"
+          VERSION="${{ steps.tag.outputs.version }}"
+
+          if [ "$CHAIN" = "cardano" ]; then
+            DOCKERFILE="platform/docker/Dockerfile.cardano"
+            # Read CLI version from versions.env
+            CLI_VERSION=$(grep '^CLI_VERSION=' chains/cardano/versions.env | cut -d= -f2)
+            [ -z "$CLI_VERSION" ] && CLI_VERSION="10.15.1.0"
+          elif [ "$CHAIN" = "apexfusion" ]; then
+            DOCKERFILE="platform/docker/Dockerfile.apexfusion"
+            CLI_VERSION=$(grep '^CLI_VERSION=' chains/apexfusion/versions.env | cut -d= -f2)
+            [ -z "$CLI_VERSION" ] && CLI_VERSION="9.4.1.0"
+          else
+            echo "::error::Unknown chain: ${CHAIN}"
+            exit 1
+          fi
+
+          echo "dockerfile=${DOCKERFILE}" >> $GITHUB_OUTPUT
+          echo "cli_version=${CLI_VERSION}" >> $GITHUB_OUTPUT
+          echo "Chain: ${CHAIN}, Dockerfile: ${DOCKERFILE}, CLI: ${CLI_VERSION}"
 
       - name: Generate changelog
         id: changelog
         run: |
-          # Get commits since last tag
           PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ steps.tag.outputs.tag }}$" | head -1)
           if [ -n "$PREV_TAG" ]; then
-            RANGE="${PREV_TAG}..${{ steps.tag.outputs.tag }}"
-            echo "Changelog range: ${RANGE}"
-            CHANGES=$(git log --pretty=format:"- %s (%h)" ${RANGE} 2>/dev/null || echo "- Initial release")
+            CHANGES=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..${{ steps.tag.outputs.tag }} 2>/dev/null || echo "- Initial release")
           else
             CHANGES=$(git log --pretty=format:"- %s (%h)" -20)
           fi
 
-          # Write to file for the release body
-          cat > /tmp/changelog.md << EOF
-          ## Hybrid-Node ${{ steps.tag.outputs.tag }}
+          CHAIN="${{ steps.tag.outputs.chain }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${{ steps.tag.outputs.version }}"
 
-          **Chain:** ${{ steps.version.outputs.chain }}
-          **Node Version:** ${{ steps.version.outputs.version }}
+          cat > /tmp/changelog.md << EOF
+          ## Hybrid-Node ${TAG}
+
+          **Chain:** ${CHAIN}
+          **Node Version:** ${VERSION}
+          **CLI Version:** ${{ steps.params.outputs.cli_version }}
 
           ### Changes
           ${CHANGES}
 
           ### Docker Images
           \`\`\`
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.chain }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${CHAIN}-${VERSION}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${CHAIN}
           \`\`\`
 
           ### Deployment
           \`\`\`bash
-          # Helm (K3s)
-          helm upgrade hybrid-node ./charts/hybrid-node \\
-            --set image.tag=${{ steps.tag.outputs.tag }}
+          # Helm
+          helm upgrade ${CHAIN}-relay ./charts/hybrid-node \\
+            --set image.tag=${CHAIN}-${VERSION}
 
           # Docker
           docker run -d \\
-            -e NETWORK=mainnet \\
+            -e NETWORK=$([ "$CHAIN" = "apexfusion" ] && echo "afpm" || echo "mainnet") \\
             -e NODE_MODE=relay \\
-            -v cardano-db:/opt/cardano/cnode/db \\
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            -v ${CHAIN}-db:/opt/cardano/cnode/db \\
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${CHAIN}-${VERSION}
+
+          # Makefile
+          make run-relay CHAIN=${CHAIN}
           \`\`\`
           EOF
 
@@ -104,37 +135,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}.{{patch}}
-            type=raw,value=${{ steps.tag.outputs.tag }}
-            type=raw,value=${{ steps.version.outputs.chain }}
-            type=raw,value=latest
-
       - name: Build and push release image
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: platform/docker/Dockerfile
+          file: ${{ steps.params.outputs.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.chain }}-${{ steps.tag.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.chain }}
           build-args: |
-            NODE_VERSION=${{ steps.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            NODE_VERSION=${{ steps.tag.outputs.version }}
+            CLI_VERSION=${{ steps.params.outputs.cli_version }}
+          cache-from: type=gha,scope=${{ steps.tag.outputs.chain }}
+          cache-to: type=gha,mode=max,scope=${{ steps.tag.outputs.chain }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: Hybrid-Node ${{ steps.tag.outputs.tag }}
+          name: "Hybrid-Node ${{ steps.tag.outputs.tag }} (${{ steps.tag.outputs.chain }})"
           body_path: /tmp/changelog.md
           draft: false
           prerelease: ${{ contains(steps.tag.outputs.tag, 'rc') || contains(steps.tag.outputs.tag, 'beta') }}
@@ -146,10 +168,14 @@ jobs:
         run: |
           echo "## 🚀 Release ${{ steps.tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Chain:** ${{ steps.version.outputs.chain }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Node Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Chain:** ${{ steps.tag.outputs.chain }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Node Version:** ${{ steps.tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**CLI Version:** ${{ steps.params.outputs.cli_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dockerfile:** ${{ steps.params.outputs.dockerfile }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Published Tags" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.chain }}-${{ steps.tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.chain }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

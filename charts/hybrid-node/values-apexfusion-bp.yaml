@@ -1,0 +1,59 @@
+# Example: ApexFusion Prime Mainnet Block Producer
+# Usage: helm install apex-bp ./charts/hybrid-node -f charts/hybrid-node/values-apexfusion-bp.yaml
+#
+# PREREQUISITES:
+#   1. Create a K8s secret with your pool keys:
+#      kubectl create secret generic apex-pool-keys \
+#        --from-file=hot.skey=./hot.skey \
+#        --from-file=vrf.skey=./vrf.skey \
+#        --from-file=op.cert=./op.cert
+
+image:
+  repository: ghcr.io/gvolcy/hybrid-node
+  tag: "apexfusion-10.1.4"
+
+cardano:
+  network: afpm            # ApexFusion Prime Mainnet (Vector chain)
+  mode: bp
+  port: 6000
+  cpuCores: 2
+  cncliEnabled: "Y"
+  mithrilDownload: "N"     # Mithril not available for ApexFusion
+  mithrilSigner: "N"       # Mithril signer not available for ApexFusion
+
+pool:
+  name: "MYPOOL"
+  ticker: "MPOOL"
+
+kesSecret:
+  enabled: true
+  secretName: "apex-pool-keys"
+
+networkPolicy:
+  enabled: true
+  allowedRelayCIDRs:
+    - "1.2.3.4/32"          # Replace with relay1 IP
+  allowClusterTraffic: true
+
+resources:
+  requests:
+    memory: "4Gi"
+    cpu: "2"
+  limits:
+    memory: "8Gi"
+    cpu: "4"
+
+persistence:
+  db:
+    enabled: true
+    size: 50Gi
+  guildDb:
+    enabled: true
+    size: 5Gi
+
+service:
+  type: ClusterIP
+  port: 6000
+
+metrics:
+  enabled: true

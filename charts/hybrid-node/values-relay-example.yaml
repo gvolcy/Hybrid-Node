@@ -1,9 +1,9 @@
 # Example: Cardano Mainnet Relay Node
-# Usage: helm install relay ./charts/hybrid-node -f charts/hybrid-node/values-relay-example.yaml
+# Usage: helm install cardano-relay ./charts/hybrid-node -f charts/hybrid-node/values-relay-example.yaml
 
 image:
   repository: ghcr.io/gvolcy/hybrid-node
-  tag: "10.7.0"
+  tag: "cardano-10.6.3"
 
 cardano:
   network: mainnet

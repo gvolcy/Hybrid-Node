@@ -1,11 +1,13 @@
 apiVersion: v2
 name: hybrid-node
-description: Hybrid Cardano Node - Guild Operators + Blink Labs for K3s
+description: Multi-chain blockchain node deployment — Cardano, ApexFusion, Midnight
 type: application
-version: 0.2.0
-appVersion: "10.7.0"
+version: 0.3.0
+appVersion: "multi-chain"
 keywords:
   - cardano
+  - apexfusion
+  - midnight
   - blockchain
   - stakepool
   - k3s

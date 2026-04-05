@@ -1,23 +1,32 @@
 version: 2
 updates:
-  # Keep GitHub Actions up to date
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    commit-message:
-      prefix: "ci"
     labels:
       - "dependencies"
       - "ci"
 
-  # Keep Docker base image up to date
+  # Docker — Cardano Dockerfile
   - package-ecosystem: "docker"
     directory: "/platform/docker"
     schedule:
       interval: "monthly"
-    commit-message:
-      prefix: "build"
     labels:
       - "dependencies"
       - "docker"
+      - "cardano"
+    ignore:
+      # Don't auto-bump node versions — requires manual validation per chain
+      - dependency-name: "ghcr.io/blinklabs-io/haskell"
+
+  # Helm chart
+  - package-ecosystem: "docker"
+    directory: "/charts/hybrid-node"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "helm"

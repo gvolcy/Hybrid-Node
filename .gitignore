@@ -61,3 +61,8 @@ id_ed25519
 # GPG keys
 *.gpg
 *.asc
+
+# ============================================================================
+# EXCEPTIONS — version pins contain no secrets, must be tracked
+# ============================================================================
+!chains/*/versions.env

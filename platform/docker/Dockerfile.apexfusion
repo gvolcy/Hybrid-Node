@@ -1,0 +1,249 @@
+# ============================================================================
+# Hybrid-Node — ApexFusion
+# ApexFusion Prime (Vector chain) node image: afpm (mainnet) / afpt (testnet)
+# Uses the same cardano-node binary but with ApexFusion-specific genesis/config
+# Guild Operators from Scitz0/guild-operators-apex
+# ============================================================================
+# IMPORTANT: ApexFusion has its own release cycle. Do NOT bump NODE_VERSION
+# to match Cardano without confirming compatibility with the ApexFusion network.
+# Check: https://github.com/Scitz0/guild-operators-apex
+#         https://github.com/Apex-Fusion/prime-docker
+# ============================================================================
+
+# ----- Build Arguments -----
+ARG NODE_VERSION=10.1.4
+ARG GHC_VERSION=9.6.6
+ARG CABAL_VERSION=3.12.1.0
+ARG HASKELL_IMAGE_TAG=9.6.6-3.12.1.0-3
+
+# ============================================================================
+# Stage 1: Build cardano-node from source (Blink Labs approach)
+# ============================================================================
+FROM ghcr.io/blinklabs-io/haskell:${HASKELL_IMAGE_TAG} AS build
+
+ARG NODE_VERSION
+
+# Install build deps
+RUN apt-get update && apt-get install -y --no-install-recommends liburing-dev libsnappy-dev \
+    protobuf-compiler && rm -rf /var/lib/apt/lists/*
+
+RUN echo "Building cardano-node ${NODE_VERSION} (ApexFusion)..." && \
+    git clone --depth 1 --branch ${NODE_VERSION} \
+      https://github.com/IntersectMBO/cardano-node.git /build/cardano-node && \
+    cd /build/cardano-node && \
+    echo "package cardano-crypto-praos"     >  cabal.project.local && \
+    echo "  flags: -external-libsodium-vrf" >> cabal.project.local && \
+    cabal update && \
+    cabal build cardano-node && \
+    mkdir -p /build/bin && \
+    cp $(cabal list-bin cardano-node) /build/bin/ && \
+    cp $(cabal list-bin cardano-tracer) /build/bin/ 2>/dev/null || true && \
+    cp $(cabal list-bin cardano-submit-api) /build/bin/ 2>/dev/null || true && \
+    strip /build/bin/cardano-*
+
+# ============================================================================
+# Stage 2: Download pre-built companion tools
+# ============================================================================
+FROM debian:bookworm-slim AS tools
+
+ARG TARGETARCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# --- Mithril (included for image compatibility but NOT used at runtime for APEX) ---
+ARG MITHRIL_RELEASE=2603.1
+ARG MITHRIL_CLIENT_VERSION=0.12.38
+ARG MITHRIL_SIGNER_VERSION=0.3.7
+ARG MITHRIL_BUILD_HASH=567a8e8
+
+RUN ARCH="${TARGETARCH}" && \
+    echo "Installing mithril-client ${MITHRIL_CLIENT_VERSION} (${ARCH})..." && \
+    curl -sL -o /tmp/mithril-client.deb \
+      "https://github.com/input-output-hk/mithril/releases/download/${MITHRIL_RELEASE}/mithril-client-cli_${MITHRIL_CLIENT_VERSION}%2B${MITHRIL_BUILD_HASH}-1_${ARCH}.deb" && \
+    dpkg -i /tmp/mithril-client.deb && \
+    rm -f /tmp/mithril-client.deb && \
+    echo "Installing mithril-signer ${MITHRIL_SIGNER_VERSION} (${ARCH})..." && \
+    curl -sL -o /tmp/mithril-signer.deb \
+      "https://github.com/input-output-hk/mithril/releases/download/${MITHRIL_RELEASE}/mithril-signer_${MITHRIL_SIGNER_VERSION}%2B${MITHRIL_BUILD_HASH}-1_${ARCH}.deb" && \
+    dpkg -i /tmp/mithril-signer.deb && \
+    rm -f /tmp/mithril-signer.deb
+
+# --- nview (Blink Labs — raw binary) ---
+ARG NVIEW_VERSION=0.13.0
+RUN ARCH="${TARGETARCH}" && \
+    curl -sL -o /usr/local/bin/nview \
+      "https://github.com/blinklabs-io/nview/releases/download/v${NVIEW_VERSION}/nview-v${NVIEW_VERSION}-linux-${ARCH}" && \
+    chmod +x /usr/local/bin/nview
+
+# --- txtop (Blink Labs — raw binary) ---
+ARG TXTOP_VERSION=0.14.0
+RUN ARCH="${TARGETARCH}" && \
+    curl -sL -o /usr/local/bin/txtop \
+      "https://github.com/blinklabs-io/txtop/releases/download/v${TXTOP_VERSION}/txtop-v${TXTOP_VERSION}-linux-${ARCH}" && \
+    chmod +x /usr/local/bin/txtop
+
+# --- cncli (cardano-community — tarball, amd64 only) ---
+ARG CNCLI_VERSION=6.7.0
+RUN ARCH="${TARGETARCH}" && \
+    if [ "${ARCH}" = "amd64" ]; then \
+      curl -sL "https://github.com/cardano-community/cncli/releases/download/v${CNCLI_VERSION}/cncli-${CNCLI_VERSION}-ubuntu22-x86_64-unknown-linux-gnu.tar.gz" \
+        | tar xz -C /usr/local/bin/ && \
+      chmod +x /usr/local/bin/cncli; \
+    else \
+      echo "cncli not available for ${ARCH}, skipping"; \
+      touch /usr/local/bin/cncli; \
+    fi
+
+# ============================================================================
+# Stage 3: Final image — Guild Operators (APEX fork) + all binaries
+# ============================================================================
+FROM debian:bookworm-slim AS final
+
+LABEL maintainer="VolcyAda <https://github.com/gvolcy>"
+LABEL org.opencontainers.image.title="Hybrid-Node (ApexFusion)"
+LABEL org.opencontainers.image.description="ApexFusion Prime node: source-built cardano-node + Guild Operators (APEX fork) + CNCLI"
+LABEL org.opencontainers.image.source="https://github.com/gvolcy/Hybrid-Node"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.hybrid-node.chain="apexfusion"
+
+ENV CNODE_HOME=/opt/cardano/cnode
+ENV SUDO=N
+
+# Runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash bc curl wget jq procps net-tools iproute2 \
+    tcptraceroute sqlite3 tmux ncurses-bin \
+    libsodium23 libsecp256k1-1 liblzma5 libz3-4 \
+    libgmp10 libnuma1 libffi8 libtinfo6 liburing2 libsnappy1v5 \
+    ca-certificates dnsutils \
+    e2fsprogs sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create guild user (UID 1000 for K3s fsGroup compatibility)
+RUN useradd -m -d /home/guild -s /bin/bash -u 1000 guild && \
+    mkdir -p ${CNODE_HOME}/{db,logs,priv,scripts,files,guild-db,sockets,mithril,backup} && \
+    mkdir -p ${CNODE_HOME}/priv/pool && \
+    mkdir -p /root/.local/bin && \
+    chown -R guild:guild /opt/cardano && \
+    echo "guild ALL=NOPASSWD: /bin/chattr" > /etc/sudoers.d/cntools && \
+    chmod 0440 /etc/sudoers.d/cntools
+
+# Copy source-built node binary from Stage 1
+COPY --from=build /build/bin/cardano-node /usr/local/bin/
+
+# Copy shared libraries from build stage
+COPY --from=build /usr/local/lib/libsecp256k1.so.2     /usr/local/lib/
+COPY --from=build /usr/local/lib/libsecp256k1.so.2.0.2 /usr/local/lib/
+RUN ldconfig
+
+# Copy companion tools from Stage 2
+COPY --from=tools /usr/bin/mithril-client  /usr/local/bin/
+COPY --from=tools /usr/bin/mithril-signer  /usr/local/bin/
+COPY --from=tools /usr/local/bin/nview     /usr/local/bin/
+COPY --from=tools /usr/local/bin/txtop     /usr/local/bin/
+COPY --from=tools /usr/local/bin/cncli     /usr/local/bin/
+
+# ---- Install Guild Operators scripts (ApexFusion — Scitz0/guild-operators-apex) ----
+ARG G_ACCOUNT=Scitz0
+ARG GUILD_REPO=guild-operators-apex
+ARG GUILD_DEPLOY_BRANCH=main
+
+RUN apt-get update && \
+    curl -sS -o /tmp/guild-deploy.sh \
+      https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
+    chmod +x /tmp/guild-deploy.sh && \
+    SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y \
+    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -p /opt/cardano -s p && \
+    apt-get -y purge && apt-get -y clean && apt-get -y autoremove && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y \
+    bash /tmp/guild-deploy.sh -b ${GUILD_DEPLOY_BRANCH} -p /opt/cardano -s dcmowx && \
+    rm -f /tmp/guild-deploy.sh && \
+    chown -R guild:guild ${CNODE_HOME} && \
+    mv /root/.local/bin /home/guild/.local/ 2>/dev/null || true && \
+    chown -R guild:guild /home/guild/
+
+# Download configs for Cardano networks (needed for guild-ops script compatibility)
+RUN bash -c 'networks=(guild mainnet preprod preview); \
+    files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json); \
+    for network in "${networks[@]}"; do \
+        mkdir -pv ${CNODE_HOME}/files/${network} && \
+        for file in "${files[@]}"; do \
+            curl -s -o ${CNODE_HOME}/files/${network}/${file} \
+              https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
+        done; \
+    done' && chown -R guild:guild /opt/cardano
+
+# Download configs for ApexFusion Vector networks (afpm=mainnet, afpt=testnet)
+RUN bash -c 'networks=(afpm afpt); \
+    files=({alonzo,byron,conway,shelley}-genesis.json config.json topology.json db-sync-config.json); \
+    for network in "${networks[@]}"; do \
+        mkdir -pv ${CNODE_HOME}/files/${network} && \
+        for file in "${files[@]}"; do \
+            curl -s -o ${CNODE_HOME}/files/${network}/${file} \
+              https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/files/configs/${network}/${file} 2>/dev/null || true; \
+        done; \
+    done' && chown -R guild:guild /opt/cardano
+
+# Download cardano-cli (ApexFusion requires CLI 9.x — NOT 10.x)
+ARG CLI_VERSION=9.4.1.0
+RUN ARCH=$(uname -m | sed 's/aarch64/aarch64/;s/x86_64/x86_64/') && \
+    curl -sL "https://github.com/IntersectMBO/cardano-cli/releases/download/cardano-cli-${CLI_VERSION}/cardano-cli-${CLI_VERSION}-${ARCH}-linux.tar.gz" \
+      | tar xz -C /tmp && \
+    mv /tmp/cardano-cli-${ARCH}-linux /usr/local/bin/cardano-cli && \
+    chmod +x /usr/local/bin/cardano-cli && \
+    rm -rf /tmp/cardano-cli-* && \
+    echo "Installed cardano-cli ${CLI_VERSION}"
+
+# Download mithril guild scripts (present but unused for APEX networks at runtime)
+RUN for script in mithril-client.sh mithril-signer.sh mithril-relay.sh; do \
+      curl -sS -o ${CNODE_HOME}/scripts/${script} \
+        "https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/${script}" 2>/dev/null && \
+        chmod +x ${CNODE_HOME}/scripts/${script} 2>/dev/null || true; \
+    done && chown -R guild:guild ${CNODE_HOME}/scripts/
+
+# Copy entrypoint and healthcheck
+COPY platform/bin/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+COPY platform/bin/healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
+# Copy ApexFusion-specific config overrides
+COPY chains/apexfusion/configs/ ${CNODE_HOME}/hybrid-configs/
+RUN chown -R guild:guild ${CNODE_HOME}/hybrid-configs/
+
+# Environment defaults — APEX mainnet by default
+ENV NETWORK=afpm \
+    NODE_MODE=relay \
+    NODE_PORT=6000 \
+    CNODE_PORT=6000 \
+    CARDANO_NODE_SOCKET_PATH=${CNODE_HOME}/sockets/node.socket \
+    UPDATE_CHECK=N \
+    MITHRIL_DOWNLOAD=N \
+    MITHRIL_SIGNER=N \
+    CPU_CORES=2 \
+    CNCLI_ENABLED=N \
+    START_AS_NON_PRODUCING=false \
+    ENABLE_BACKUP=N \
+    ENABLE_RESTORE=N \
+    EKG_HOST=0.0.0.0 \
+    PROMETHEUS_HOST=0.0.0.0 \
+    PROMETHEUS_PORT=12798 \
+    PATH="${CNODE_HOME}/scripts:/usr/local/bin:${PATH}"
+
+EXPOSE 6000 12798 12788 9090
+
+VOLUME ["${CNODE_HOME}/db", "${CNODE_HOME}/priv", "${CNODE_HOME}/logs", \
+        "${CNODE_HOME}/guild-db", "${CNODE_HOME}/sockets", "${CNODE_HOME}/mithril"]
+
+HEALTHCHECK --interval=60s --timeout=10s --start-period=600s --retries=3 \
+    CMD ["/usr/local/bin/healthcheck.sh"]
+
+USER guild
+WORKDIR ${CNODE_HOME}
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

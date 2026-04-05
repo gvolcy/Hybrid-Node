@@ -1,5 +1,5 @@
 # Example: Cardano Mainnet Block Producer
-# Usage: helm install bp ./charts/hybrid-node -f charts/hybrid-node/values-bp-example.yaml
+# Usage: helm install cardano-bp ./charts/hybrid-node -f charts/hybrid-node/values-bp-example.yaml
 #
 # PREREQUISITES:
 #   1. Create a K8s secret with your pool keys:
@@ -12,7 +12,7 @@
 
 image:
   repository: ghcr.io/gvolcy/hybrid-node
-  tag: "10.7.0"
+  tag: "cardano-10.6.3"
 
 cardano:
   network: mainnet

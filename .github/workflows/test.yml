@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'platform/docker/Dockerfile'
+      - 'platform/docker/Dockerfile.*'
       - 'bin/**'
       - 'platform/bin/**'
       - 'chains/**'
@@ -12,21 +12,33 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'platform/docker/Dockerfile'
+      - 'platform/docker/Dockerfile.*'
       - 'bin/**'
       - 'platform/bin/**'
       - 'chains/**'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 
-env:
-  TEST_IMAGE: hybrid-node-test:ci
-
 jobs:
   build-and-test:
-    name: Build & Smoke Test
+    name: Test ${{ matrix.chain }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: [cardano, apexfusion]
+        include:
+          - chain: cardano
+            dockerfile: platform/docker/Dockerfile.cardano
+            test_network: preprod
+          - chain: apexfusion
+            dockerfile: platform/docker/Dockerfile.apexfusion
+            test_network: afpt
+
+    env:
+      TEST_IMAGE: hybrid-node-test-${{ matrix.chain }}:ci
 
     steps:
       - uses: actions/checkout@v4
@@ -34,22 +46,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build test image
+      - name: Build ${{ matrix.chain }} test image
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: platform/docker/Dockerfile
+          file: ${{ matrix.dockerfile }}
           load: true
           tags: ${{ env.TEST_IMAGE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.chain }}-test
+          cache-to: type=gha,mode=max,scope=${{ matrix.chain }}-test
 
       - name: Verify image metadata
         run: |
-          echo "### Image Inspection" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          docker inspect "$TEST_IMAGE" --format '{{.Config.Healthcheck}}' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### ${{ matrix.chain }} Image Inspection" >> $GITHUB_STEP_SUMMARY
+
+          # Verify chain label
+          CHAIN_LABEL=$(docker inspect "$TEST_IMAGE" --format '{{index .Config.Labels "org.hybrid-node.chain"}}')
+          echo "Chain label: ${CHAIN_LABEL}"
+          if [ "${CHAIN_LABEL}" != "${{ matrix.chain }}" ]; then
+            echo "::error::Chain label mismatch: expected ${{ matrix.chain }}, got ${CHAIN_LABEL}"
+            exit 1
+          fi
+          echo "✅ Chain label: ${CHAIN_LABEL}"
 
           # Verify HEALTHCHECK is configured
           HC=$(docker inspect "$TEST_IMAGE" --format '{{.Config.Healthcheck.Test}}')
@@ -57,7 +75,7 @@ jobs:
             echo "::error::HEALTHCHECK not configured in image"
             exit 1
           fi
-          echo "✅ HEALTHCHECK configured: $HC"
+          echo "✅ HEALTHCHECK configured"
 
       - name: Verify entrypoint exists
         run: |
@@ -79,49 +97,49 @@ jobs:
           VERSION=$(docker run --rm --entrypoint cardano-node "$TEST_IMAGE" version 2>&1 | head -1)
           echo "✅ cardano-node: $VERSION"
 
-      - name: Smoke test - relay startup
+      - name: Smoke test - ${{ matrix.chain }} startup
         run: |
-          echo "Starting relay node container..."
-          docker run -d --name test-relay \
-            -e NETWORK=preprod \
+          echo "Starting ${{ matrix.chain }} node container (network=${{ matrix.test_network }})..."
+          docker run -d --name test-${{ matrix.chain }} \
+            -e NETWORK=${{ matrix.test_network }} \
             -e NODE_MODE=relay \
             -e MITHRIL_DOWNLOAD=N \
             "$TEST_IMAGE"
 
-          # Give the node time to initialize
           echo "Waiting 60s for node initialization..."
           sleep 60
 
-          # Check container is still running
-          STATE=$(docker inspect test-relay --format '{{.State.Status}}')
+          STATE=$(docker inspect test-${{ matrix.chain }} --format '{{.State.Status}}')
           if [ "$STATE" != "running" ]; then
             echo "::error::Container exited unexpectedly"
-            docker logs test-relay
+            docker logs test-${{ matrix.chain }}
             exit 1
           fi
-          echo "✅ Container running after 60s"
+          echo "✅ ${{ matrix.chain }} container running after 60s"
 
-          # Check logs for startup indicators
-          docker logs test-relay 2>&1 | tail -30
+          docker logs test-${{ matrix.chain }} 2>&1 | tail -30
 
-          echo "### Smoke Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "### ${{ matrix.chain }} Smoke Test" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Container running | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container running (${{ matrix.test_network }}) | ✅ |" >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup
         if: always()
         run: |
-          docker rm -f test-relay 2>/dev/null || true
+          docker rm -f test-${{ matrix.chain }} 2>/dev/null || true
 
-  shellcheck-healthcheck:
-    name: ShellCheck healthcheck.sh
+  shellcheck:
+    name: ShellCheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install ShellCheck
         run: sudo apt-get install -y shellcheck
+
+      - name: Lint entrypoint.sh
+        run: shellcheck -x -s bash bin/entrypoint.sh
 
       - name: Lint healthcheck.sh
         run: shellcheck -x -s bash bin/healthcheck.sh
