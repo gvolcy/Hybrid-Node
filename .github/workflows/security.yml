@@ -1,0 +1,83 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan every Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+
+jobs:
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+  dockerfile-scan:
+    name: Container Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: 'platform/docker/Dockerfile'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  helm-scan:
+    name: Helm Chart Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint Helm chart
+        run: helm lint charts/hybrid-node/
+
+      - name: Template and scan
+        run: |
+          helm template test charts/hybrid-node/ \
+            --set cardano.network=preprod \
+            --set cardano.mode=relay \
+            > /tmp/rendered.yaml
+
+          echo "### Helm Template Output" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Chart renders successfully" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for hardcoded secrets in templates
+        run: |
+          FOUND=0
+          for f in charts/hybrid-node/templates/*.yaml; do
+            if grep -inE '(password|secret|token|apikey|api_key)\s*[:=]\s*["\x27][^{]' "$f" 2>/dev/null; then
+              echo "::warning file=$f::Possible hardcoded secret found"
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::warning::Review hardcoded values in Helm templates"
+          else
+            echo "✅ No hardcoded secrets found in Helm templates"
+          fi

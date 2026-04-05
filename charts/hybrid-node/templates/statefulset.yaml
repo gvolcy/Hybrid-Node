@@ -138,7 +138,7 @@ spec:
               command:
                 - sh
                 - -c
-                - "test -S /opt/cardano/cnode/sockets/node.socket"
+                - "/usr/local/bin/healthcheck.sh"
             initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
@@ -148,7 +148,7 @@ spec:
               command:
                 - sh
                 - -c
-                - "test -S /opt/cardano/cnode/sockets/node.socket"
+                - "/usr/local/bin/healthcheck.sh"
             initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}

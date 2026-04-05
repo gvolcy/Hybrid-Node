@@ -1,0 +1,64 @@
+# Example: Cardano Mainnet Block Producer
+# Usage: helm install bp ./charts/hybrid-node -f charts/hybrid-node/values-bp-example.yaml
+#
+# PREREQUISITES:
+#   1. Create a K8s secret with your pool keys:
+#      kubectl create secret generic pool-keys \
+#        --from-file=hot.skey=./hot.skey \
+#        --from-file=vrf.skey=./vrf.skey \
+#        --from-file=op.cert=./op.cert
+#
+#   2. Set up NetworkPolicy relay CIDRs to protect BP from public access
+
+image:
+  repository: ghcr.io/gvolcy/hybrid-node
+  tag: "10.7.0"
+
+cardano:
+  network: mainnet
+  mode: bp
+  port: 6000
+  cpuCores: 4
+  cncliEnabled: "Y"        # Enable CNCLI for leaderlog/validate
+  mithrilSigner: "N"       # Enable if running Mithril signer
+
+pool:
+  name: "MYPOOL"
+  ticker: "MPOOL"
+  # id: "pool1..."          # Your pool ID (bech32)
+  # ptApiKey: ""             # PoolTool API key
+
+kesSecret:
+  enabled: true
+  secretName: "pool-keys"
+
+# CRITICAL: Restrict BP access to relay IPs only
+networkPolicy:
+  enabled: true
+  allowedRelayCIDRs:
+    - "1.2.3.4/32"          # Replace with relay1 IP
+    - "5.6.7.8/32"          # Replace with relay2 IP
+  allowClusterTraffic: true
+
+resources:
+  requests:
+    memory: "16Gi"
+    cpu: "4"
+  limits:
+    memory: "24Gi"
+    cpu: "8"
+
+persistence:
+  db:
+    enabled: true
+    size: 120Gi
+  guildDb:
+    enabled: true
+    size: 10Gi
+
+service:
+  type: ClusterIP          # BP should NOT be publicly exposed
+  port: 6000
+
+metrics:
+  enabled: true

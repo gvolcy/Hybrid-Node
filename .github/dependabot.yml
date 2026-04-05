@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Keep GitHub Actions up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "ci"
+
+  # Keep Docker base image up to date
+  - package-ecosystem: "docker"
+    directory: "/platform/docker"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+      - "docker"
