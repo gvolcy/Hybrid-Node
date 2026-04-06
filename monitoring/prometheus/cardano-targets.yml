@@ -1,0 +1,45 @@
+# Prometheus scrape targets for Hybrid-Node fleet
+# Update addresses to match your infrastructure.
+#
+# Format: file_sd_configs targets
+# See: https://prometheus.io/docs/guides/file-sd/
+
+# Cardano Mainnet
+- targets:
+    - 'main1:12798'     # BP (VOLCY + SILEM)
+    - 'main3:12798'     # Relay
+    - 'main4:12798'     # Relay
+    - 'main5:12798'     # Relay
+  labels:
+    chain: 'cardano'
+    network: 'mainnet'
+
+# ApexFusion Mainnet
+- targets:
+    - 'main1:12799'     # BP (afpm)
+    - 'main3:12799'     # Relay
+    - 'main4:12799'     # Relay
+  labels:
+    chain: 'apexfusion'
+    network: 'afpm'
+
+# Cardano Testnets (main2)
+- targets:
+    - 'main2:12798'     # Preview / Preprod / Guild
+  labels:
+    chain: 'cardano'
+    network: 'testnet'
+
+# ApexFusion Testnet (main2)
+- targets:
+    - 'main2:12799'     # AFPT
+  labels:
+    chain: 'apexfusion'
+    network: 'afpt'
+
+# Midnight (main2)
+- targets:
+    - 'main2:9615'      # midnight-node Prometheus
+  labels:
+    chain: 'midnight'
+    network: 'preview'

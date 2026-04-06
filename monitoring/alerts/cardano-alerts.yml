@@ -1,0 +1,117 @@
+# Prometheus alerting rules for Hybrid-Node
+# Add to your prometheus.yml under rule_files.
+
+groups:
+  - name: cardano_node_health
+    rules:
+      # Node is down
+      - alert: CardanoNodeDown
+        expr: up{job="cardano-nodes"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Cardano node {{ $labels.instance }} is down"
+          description: "Node has been unreachable for 5 minutes."
+
+      # Sync lag — node is behind
+      - alert: CardanoSyncLag
+        expr: >
+          (max(cardano_node_metrics_slotNum_int) by (network)
+           - cardano_node_metrics_slotNum_int) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node {{ $labels.instance }} is behind by {{ $value }} slots"
+          description: "Node sync lag detected. May indicate network issues or slow disk."
+
+      # No hot peers
+      - alert: CardanoNoPeers
+        expr: cardano_node_net_peers_hot < 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node {{ $labels.instance }} has no hot peers"
+          description: "Node is isolated — no active peer connections."
+
+      # Low hot peers
+      - alert: CardanoLowPeers
+        expr: cardano_node_net_peers_hot < 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node {{ $labels.instance }} has only {{ $value }} hot peers"
+          description: "Low peer count may indicate connectivity issues."
+
+  - name: cardano_bp_health
+    rules:
+      # KES key expiring soon
+      - alert: KESExpiringSoon
+        expr: cardano_node_metrics_remainingKESPeriods_int <= 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KES key expiring on {{ $labels.instance }}: {{ $value }} periods remaining"
+          description: "Rotate KES key before it expires or block production stops."
+
+      # KES key critical
+      - alert: KESExpiryCritical
+        expr: cardano_node_metrics_remainingKESPeriods_int <= 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "KES key CRITICAL on {{ $labels.instance }}: {{ $value }} periods remaining!"
+          description: "Immediate KES rotation required. Block production will stop when KES expires."
+
+      # BP not forging (leader but no adopted blocks in 1 hour)
+      - alert: BPNotForging
+        expr: >
+          increase(cardano_node_metrics_Forge_node_is_leader_int[1h]) > 0
+          and increase(cardano_node_metrics_Forge_adopted_int[1h]) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BP {{ $labels.instance }} is leader but not forging blocks"
+          description: "Node was scheduled as leader but did not adopt any blocks."
+
+  - name: cardano_resources
+    rules:
+      # High mempool
+      - alert: HighMempool
+        expr: cardano_node_metrics_txsInMempool_int > 500
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High mempool on {{ $labels.instance }}: {{ $value }} txs"
+          description: "Mempool is abnormally full. May indicate network congestion."
+
+      # Memory pressure (container level — requires cAdvisor)
+      - alert: HighMemoryUsage
+        expr: >
+          container_memory_usage_bytes{container=~"cardano.*"}
+          / container_spec_memory_limit_bytes{container=~"cardano.*"} > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.container }}: {{ $value | humanizePercentage }}"
+          description: "Container is using >90% of its memory limit. Risk of OOM kill."
+
+      # Disk space (requires node_exporter)
+      - alert: DiskSpaceLow
+        expr: >
+          node_filesystem_avail_bytes{mountpoint="/opt/cardano/cnode/db"}
+          / node_filesystem_size_bytes{mountpoint="/opt/cardano/cnode/db"} < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk space critical on {{ $labels.instance }}: {{ $value | humanizePercentage }} free"
+          description: "Less than 10% disk space remaining. Node may crash."
