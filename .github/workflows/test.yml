@@ -8,6 +8,7 @@ on:
       - 'bin/**'
       - 'platform/bin/**'
       - 'chains/**'
+      - 'scripts/**'
       - '.github/workflows/test.yml'
   pull_request:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - 'bin/**'
       - 'platform/bin/**'
       - 'chains/**'
+      - 'scripts/**'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 
@@ -139,7 +141,23 @@ jobs:
         run: sudo apt-get install -y shellcheck
 
       - name: Lint entrypoint.sh
-        run: shellcheck -x -s bash bin/entrypoint.sh
+        run: |
+          # Excluded codes (all intentional patterns in entrypoint.sh):
+          #   SC2034 — variables used by sourced Guild scripts
+          #   SC2317 — trap handler functions (shellcheck false positive)
+          #   SC2016 — single-quoted jq expressions (intentional)
+          #   SC1091 — sourced files not present at lint time
+          #   SC2030/SC2031 — subshell variable modifications (intentional)
+          shellcheck -x -s bash \
+            -e SC2034 -e SC2317 -e SC2016 -e SC1091 -e SC2030 -e SC2031 \
+            bin/entrypoint.sh
 
       - name: Lint healthcheck.sh
         run: shellcheck -x -s bash bin/healthcheck.sh
+
+      - name: Lint operator scripts
+        run: |
+          for f in scripts/health/*.sh; do
+            echo "Checking $f..."
+            shellcheck -x -s bash "$f"
+          done
