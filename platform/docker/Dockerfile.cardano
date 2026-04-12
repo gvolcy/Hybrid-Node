@@ -8,9 +8,9 @@
 
 # ----- Build Arguments -----
 ARG NODE_VERSION=10.7.0
-ARG GHC_VERSION=9.6.6
+ARG GHC_VERSION=9.6.7
 ARG CABAL_VERSION=3.12.1.0
-ARG HASKELL_IMAGE_TAG=9.6.6-3.12.1.0-3
+ARG HASKELL_IMAGE_TAG=9.6.7-3.12.1.0-1
 
 # ============================================================================
 # Stage 1: Build cardano-node from source (Blink Labs approach)
@@ -74,7 +74,7 @@ RUN ARCH="${TARGETARCH}" && \
     chmod +x /usr/local/bin/nview
 
 # --- txtop (Blink Labs — raw binary) ---
-ARG TXTOP_VERSION=0.14.0
+ARG TXTOP_VERSION=0.15.0
 RUN ARCH="${TARGETARCH}" && \
     curl -sL -o /usr/local/bin/txtop \
       "https://github.com/blinklabs-io/txtop/releases/download/v${TXTOP_VERSION}/txtop-v${TXTOP_VERSION}-linux-${ARCH}" && \
@@ -174,7 +174,7 @@ RUN bash -c 'networks=(guild mainnet preprod preview); \
     done' && chown -R guild:guild /opt/cardano
 
 # Download cardano-cli
-ARG CLI_VERSION=10.15.1.0
+ARG CLI_VERSION=10.16.0.0
 RUN ARCH=$(uname -m | sed 's/aarch64/aarch64/;s/x86_64/x86_64/') && \
     curl -sL "https://github.com/IntersectMBO/cardano-cli/releases/download/cardano-cli-${CLI_VERSION}/cardano-cli-${CLI_VERSION}-${ARCH}-linux.tar.gz" \
       | tar xz -C /tmp && \
