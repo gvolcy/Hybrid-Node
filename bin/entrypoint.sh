@@ -957,6 +957,14 @@ build_node_cmd() {
             priv_pool="${CNODE_HOME}/priv/pool"
         fi
 
+        # Fix key file permissions — cardano-node refuses to start if VRF/KES
+        # key files have group or other permissions.  K8s fsGroup adds group
+        # bits to all mounted files, so we must strip them before every start.
+        if [ -d "${priv_pool}" ]; then
+            chmod 0600 "${priv_pool}"/*.skey "${priv_pool}"/op.cert "${priv_pool}"/node.cert "${priv_pool}"/opcert.cert 2>/dev/null || true
+            log "BP mode: Key file permissions secured (0600)"
+        fi
+
         # Try Guild naming: hot.skey, vrf.skey, op.cert
         if [ -f "${priv_pool}/hot.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/op.cert" ]; then
             CMD="${CMD} --shelley-kes-key ${priv_pool}/hot.skey"
