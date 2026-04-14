@@ -93,6 +93,29 @@ spec:
         - key: node.kubernetes.io/disk-pressure
           operator: Exists
           effect: NoSchedule
+      # Fix VRF key permissions — K8s fsGroup adds group bits that
+      # cardano-node rejects (GroupPermissionsExist error)
+      initContainers:
+        - name: fix-key-perms
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              POOL_NAME="${POOL_NAME}"
+              POOL_DIR="/data/priv/pool/${POOL_NAME}"
+              if [ -d "$POOL_DIR" ]; then
+                chmod 0600 "$POOL_DIR"/*.skey "$POOL_DIR"/op.cert 2>/dev/null || true
+                echo "Fixed key permissions in $POOL_DIR"
+              else
+                echo "Pool dir $POOL_DIR not found, skipping"
+              fi
+          env:
+            - name: POOL_NAME
+              value: "CHANGE_ME"
+          volumeMounts:
+            - mountPath: /data/priv
+              name: priv
       containers:
         - name: cardano-node
           image: ghcr.io/gvolcy/hybrid-node:latest
@@ -557,3 +580,69 @@ spec:
               hostPath:
                 path: /snapshots
                 type: DirectoryOrCreate
+---
+# ============================================================================
+# CNCLI Keeper: detects and fixes stuck cncli processes (EKG port loop)
+# Runs every 10 minutes, checks for processes stuck retrying EKG connection
+# ============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cardano-bp-cncli-keeper
+  namespace: cardano-bp
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 300
+      template:
+        spec:
+          serviceAccountName: cardano-bp-selfheal
+          restartPolicy: Never
+          containers:
+            - name: cncli-keeper
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  DEPLOY="cardano-bp"
+                  NS="cardano-bp"
+                  POD=$(kubectl get pods -n $NS -l app=$DEPLOY -o jsonpath='{{.items[0].metadata.name}}' 2>/dev/null)
+                  if [ -z "$POD" ]; then
+                    echo "No pod found"
+                    exit 0
+                  fi
+
+                  check_and_fix_stuck() {
+                    local proc_name=$1
+                    local log_file=$2
+                    local pid
+                    pid=$(kubectl exec -n $NS "$POD" -- pgrep -f "cncli.sh $proc_name" 2>/dev/null | head -1)
+                    if [ -z "$pid" ]; then
+                      echo "$proc_name: not running (OK or not started)"
+                      return 0
+                    fi
+
+                    # Check if log shows repeated EKG connection errors (stuck in retry loop)
+                    local ekg_errors
+                    ekg_errors=$(kubectl exec -n $NS "$POD" -- tail -20 "$log_file" 2>/dev/null | grep -c "Could not connect to EKG" || echo 0)
+                    if [ "$ekg_errors" -ge 5 ]; then
+                      echo "WARNING: $proc_name (PID $pid) stuck in EKG retry loop ($ekg_errors errors). Killing..."
+                      kubectl exec -n $NS "$POD" -- kill "$pid" 2>/dev/null || true
+                      sleep 2
+                      kubectl exec -n $NS "$POD" -- bash -c "nohup /opt/cardano/cnode/scripts/cncli.sh $proc_name >> $log_file 2>&1 &"
+                      echo "$proc_name restarted"
+                    else
+                      echo "$proc_name: running OK (PID $pid)"
+                    fi
+                  }
+
+                  check_and_fix_stuck "sync" "/opt/cardano/cnode/logs/cncli-sync.log"
+                  check_and_fix_stuck "leaderlog" "/opt/cardano/cnode/logs/cncli-leaderlog.log"
+                  check_and_fix_stuck "validate" "/opt/cardano/cnode/logs/cncli-validate.log"
+                  echo "CNCLI keeper completed"
