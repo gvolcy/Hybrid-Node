@@ -45,7 +45,7 @@ jobs:
         include:
           - chain: cardano
             dockerfile: platform/docker/Dockerfile.cardano
-            default_node_version: "10.6.3"
+            default_node_version: "10.6.4"
             default_cli_version: "10.15.1.0"
           - chain: apexfusion
             dockerfile: platform/docker/Dockerfile.apexfusion
