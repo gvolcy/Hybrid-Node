@@ -7,7 +7,7 @@ Template scripts for Mithril signer and DMQ node deployment on Cardano nodes.
 ### `autostart-signer.sh`
 Basic Mithril signer autostart script (no DMQ). Used for nodes that only need standard Mithril signing (e.g., preview-silem).
 
-- Downloads stable Mithril signer binary (v2603.1) if not present
+- Downloads stable Mithril signer binary (v2617.0) if not present
 - Manages signer process lifecycle with PID file tracking
 - Requires `mithril.env` in the same directory for configuration
 
@@ -38,5 +38,5 @@ DMQ node v0.4.2.0 setup and autostart script.
 
 | Component       | Version  | Tag/Commit |
 |----------------|----------|------------|
-| Mithril Signer | 2603.1   | 567a8e8    |
+| Mithril Signer | 2617.0   | 2478748    |
 | DMQ Node       | 0.4.2.0  | latest     |

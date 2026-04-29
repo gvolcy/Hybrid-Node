@@ -35,7 +35,7 @@ version pins, and image tags — there is no ambiguous `latest` tag.
 
 | Chain | Dockerfile | Node Version | Image Tag |
 |-------|-----------|--------------|-----------|
-| **Cardano** | `platform/docker/Dockerfile.cardano` | 10.6.3 | `ghcr.io/gvolcy/hybrid-node:cardano-10.6.3` |
+| **Cardano** | `platform/docker/Dockerfile.cardano` | 10.7.1 | `ghcr.io/gvolcy/hybrid-node:cardano-10.7.1` |
 | **ApexFusion** | `platform/docker/Dockerfile.apexfusion` | 10.1.4 | `ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4` |
 | **Midnight** | Pre-built upstream image | 0.22.3 | `midnightntwrk/midnight-node:0.22.3` |
 
@@ -43,8 +43,8 @@ Version pins for each chain live in `chains/<chain>/versions.env`:
 
 ```bash
 # chains/cardano/versions.env
-NODE_VERSION=10.6.3
-CLI_VERSION=10.15.1.0
+NODE_VERSION=10.7.1
+CLI_VERSION=10.16.0.0
 G_ACCOUNT=cardano-community
 GUILD_REPO=guild-operators
 GUILD_DEPLOY_BRANCH=master

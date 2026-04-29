@@ -217,7 +217,8 @@ The latest upstream `cardano-node` releases from [IntersectMBO](https://github.c
 
 | Version | Date | Notes |
 |---------|------|-------|
-| **10.7.0** | Mar 2026 | LSM Tree backend (8GB RAM), KES Agent, cardano-rpc (gRPC), `behindFirewall` peer config. **Latest stable.** Requires full chain replay. |
+| **10.7.1** | Apr 2026 | Mempool perf fixes, LSM-trees snapshot fixes, Plutus & tracing improvements. Adds `liburing`, `protobuf-compiler`, `snappy-c` deps on Linux. **Latest stable.** |
+| **10.7.0** | Mar 2026 | LSM Tree backend (8GB RAM), KES Agent, cardano-rpc (gRPC), `behindFirewall` peer config. Requires full chain replay. |
 | **10.6.2** | Feb 2026 | Plutus V4 features, mempool hardening, ARM64 OCI images. |
 | **10.5.4** | Feb 2026 | Networking robustness, preview genesis checkpoint, SPO upgrade recommended. |
 | **10.4.1** | Apr 2025 | UTxO-HD integration (InMemory + LMDB backends). |
