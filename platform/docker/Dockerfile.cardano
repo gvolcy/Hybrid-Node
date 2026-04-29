@@ -49,10 +49,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # --- Mithril (IOG .deb packages from stable release) ---
-ARG MITHRIL_RELEASE=2603.1
-ARG MITHRIL_CLIENT_VERSION=0.12.38
-ARG MITHRIL_SIGNER_VERSION=0.3.7
-ARG MITHRIL_BUILD_HASH=567a8e8
+# Distribution 2617.0 — mithril-signer is now stable 1.0.0 (production-ready)
+ARG MITHRIL_RELEASE=2617.0
+ARG MITHRIL_CLIENT_VERSION=0.13.9
+ARG MITHRIL_SIGNER_VERSION=1.0.0
+ARG MITHRIL_BUILD_HASH=2478748
 
 RUN ARCH="${TARGETARCH}" && \
     echo "Installing mithril-client ${MITHRIL_CLIENT_VERSION} (${ARCH})..." && \
