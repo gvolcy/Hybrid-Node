@@ -15,7 +15,7 @@
 | txtop | 0.14.0 | 0.14.0 | Mempool viewer |
 | Guild Operators | cardano-community/master | Scitz0/main | Different forks |
 | Base image | debian:bookworm-slim | debian:bookworm-slim | Shared |
-| Haskell image | blinklabs-io/haskell:9.6.6-3.12.1.0-3 | Same | Build stage only |
+| Haskell image | blinklabs-io/haskell:9.6.7-3.12.1.0-3 | Same | Build stage only |
 
 ## Midnight
 
