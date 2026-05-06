@@ -1,15 +1,14 @@
 name: Integration Test
 
 on:
-  push:
+  # Run after Build finishes on main: pull the freshly-pushed image from GHCR
+  # and smoke-test it. No re-compile, so the job is ~2 min instead of ~40 min.
+  workflow_run:
+    workflows: ["Build"]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'platform/docker/Dockerfile.*'
-      - 'bin/**'
-      - 'platform/bin/**'
-      - 'chains/**'
-      - 'scripts/**'
-      - '.github/workflows/test.yml'
+  # PRs can't push to GHCR, so PRs still build from source — but reuse the
+  # Build workflow's cache scope so a warm main cache makes them fast.
   pull_request:
     branches: [main]
     paths:
@@ -24,11 +23,15 @@ on:
 jobs:
   build-and-test:
     name: Test ${{ matrix.chain }}
+    # Skip if the upstream Build failed/was cancelled. PR + dispatch always run.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    # Cardano image build (haskell + cardano-node from source) routinely runs
-    # ~40-45 min on a cold GHA cache, so 45 min was hitting the timeout on
-    # any cache miss (e.g. base-image / version bumps). 90 min gives headroom.
-    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+    # 60 min covers the worst case (PR with cold cache + version bump).
+    # Pull-from-GHCR path on main finishes in ~2 min.
+    timeout-minutes: 60
 
     strategy:
       fail-fast: false
@@ -44,22 +47,67 @@ jobs:
 
     env:
       TEST_IMAGE: hybrid-node-test-${{ matrix.chain }}:ci
+      REGISTRY: ghcr.io
+      IMAGE_NAME: gvolcy/hybrid-node
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On workflow_run, default checkout is the workflow file's commit on
+          # main; pin to the SHA that triggered Build so versions.env matches
+          # the image we're about to pull.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      - name: Resolve image tag from chains/${{ matrix.chain }}/versions.env
+        id: ver
+        run: |
+          # shellcheck disable=SC1090
+          . "chains/${{ matrix.chain }}/versions.env"
+          echo "node_version=${NODE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "ghcr_image=${REGISTRY}/${IMAGE_NAME}:${{ matrix.chain }}-${NODE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${{ matrix.chain }} → ${REGISTRY}/${IMAGE_NAME}:${{ matrix.chain }}-${NODE_VERSION}"
+
+      # ---------- Path A: PR — build from source (PRs can't push to GHCR) ----------
       - name: Set up Docker Buildx
+        if: github.event_name == 'pull_request'
         uses: docker/setup-buildx-action@v3
 
-      - name: Build ${{ matrix.chain }} test image
+      - name: Build ${{ matrix.chain }} test image (PR only)
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           load: true
           tags: ${{ env.TEST_IMAGE }}
-          cache-from: type=gha,scope=${{ matrix.chain }}-test
-          cache-to: type=gha,mode=max,scope=${{ matrix.chain }}-test
+          # Reuse the Build workflow's cache scope so a warm main cache helps.
+          cache-from: type=gha,scope=${{ matrix.chain }}
+
+      # ---------- Path B: workflow_run / dispatch — pull from GHCR ----------
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull ${{ matrix.chain }} image from GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE="${{ steps.ver.outputs.ghcr_image }}"
+          echo "Pulling $IMAGE ..."
+          # Build workflow may have just finished; allow a short retry window
+          # for registry propagation.
+          for i in 1 2 3 4 5; do
+            if docker pull "$IMAGE"; then
+              break
+            fi
+            echo "Pull attempt $i failed, sleeping 15s..."
+            sleep 15
+          done
+          docker image inspect "$IMAGE" >/dev/null
+          docker tag "$IMAGE" "$TEST_IMAGE"
 
       - name: Verify image metadata
         run: |
