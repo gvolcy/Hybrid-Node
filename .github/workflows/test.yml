@@ -25,7 +25,10 @@ jobs:
   build-and-test:
     name: Test ${{ matrix.chain }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Cardano image build (haskell + cardano-node from source) routinely runs
+    # ~40-45 min on a cold GHA cache, so 45 min was hitting the timeout on
+    # any cache miss (e.g. base-image / version bumps). 90 min gives headroom.
+    timeout-minutes: 90
 
     strategy:
       fail-fast: false
