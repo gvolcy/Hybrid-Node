@@ -11,6 +11,7 @@ ARG NODE_VERSION=11.0.1
 ARG GHC_VERSION=9.6.7
 ARG CABAL_VERSION=3.12.1.0
 ARG HASKELL_IMAGE_TAG=9.6.7-3.12.1.0-3
+ARG CARDANO_SIGNER_VERSION=1.35.0
 
 # ============================================================================
 # Stage 1: Build cardano-node from source (Blink Labs approach)
@@ -92,6 +93,14 @@ RUN ARCH="${TARGETARCH}" && \
       echo "cncli not available for ${ARCH}, skipping"; \
       touch /usr/local/bin/cncli; \
     fi
+
+# --- cardano-signer (gitmachtl — tarball) ---
+ARG CARDANO_SIGNER_VERSION
+RUN ARCH="${TARGETARCH}" && \
+    ARCH_NAME=$([ "${ARCH}" = "amd64" ] && echo "x64" || echo "arm64") && \
+    curl -sL "https://github.com/gitmachtl/cardano-signer/releases/download/v${CARDANO_SIGNER_VERSION}/cardano-signer-${CARDANO_SIGNER_VERSION}_linux-${ARCH_NAME}.tar.gz" \
+      | tar xz -C /usr/local/bin/ && \
+    chmod +x /usr/local/bin/cardano-signer
 
 # ============================================================================
 # Stage 3: Final image — Guild Operators structure + all binaries
