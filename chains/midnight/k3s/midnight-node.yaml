@@ -101,7 +101,7 @@ spec:
       containers:
         # ── Midnight Node ────────────────────────────────────────────────
         - name: midnight-node
-          image: midnightntwrk/midnight-node:0.22.5
+          image: midnightntwrk/midnight-node:1.0.0-rc.8
           env:
             - name: CFG_PRESET
               value: preview
