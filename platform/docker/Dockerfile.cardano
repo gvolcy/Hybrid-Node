@@ -145,11 +145,12 @@ COPY --from=build /usr/local/lib/libsecp256k1.so.2.0.2 /usr/local/lib/
 RUN ldconfig
 
 # Copy companion tools from Stage 2
-COPY --from=tools /usr/bin/mithril-client  /usr/local/bin/
-COPY --from=tools /usr/bin/mithril-signer  /usr/local/bin/
-COPY --from=tools /usr/local/bin/nview     /usr/local/bin/
-COPY --from=tools /usr/local/bin/txtop     /usr/local/bin/
-COPY --from=tools /usr/local/bin/cncli     /usr/local/bin/
+COPY --from=tools /usr/bin/mithril-client       /usr/local/bin/
+COPY --from=tools /usr/bin/mithril-signer       /usr/local/bin/
+COPY --from=tools /usr/local/bin/nview          /usr/local/bin/
+COPY --from=tools /usr/local/bin/txtop          /usr/local/bin/
+COPY --from=tools /usr/local/bin/cncli          /usr/local/bin/
+COPY --from=tools /usr/local/bin/cardano-signer /usr/local/bin/
 
 # ---- Install Guild Operators scripts (Cardano — cardano-community/guild-operators) ----
 ARG G_ACCOUNT=cardano-community
