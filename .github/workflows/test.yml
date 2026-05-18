@@ -51,7 +51,7 @@ jobs:
       IMAGE_NAME: gvolcy/hybrid-node
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # On workflow_run, default checkout is the workflow file's commit on
           # main; pin to the SHA that triggered Build so versions.env matches
@@ -70,7 +70,7 @@ jobs:
       # ---------- Path A: PR — build from source (PRs can't push to GHCR) ----------
       - name: Set up Docker Buildx
         if: github.event_name == 'pull_request'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build ${{ matrix.chain }} test image (PR only)
         if: github.event_name == 'pull_request'
@@ -186,7 +186,7 @@ jobs:
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install ShellCheck
         run: sudo apt-get install -y shellcheck
