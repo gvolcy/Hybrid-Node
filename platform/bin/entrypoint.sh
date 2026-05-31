@@ -38,9 +38,16 @@ fi
 : "${MITHRIL_SIGNER:=N}"
 : "${UPDATE_CHECK:=N}"
 : "${CPU_CORES:=2}"
-# Always rebuild RTS_OPTS to use actual CPU_CORES (Dockerfile bakes -N2 default)
-# -A64m: 64MB allocation area reduces GC pressure on mainnet (Blink Labs default)
-RTS_OPTS="-N${CPU_CORES} -I0 -A64m -qg -qb --disable-delayed-os-memory-return"
+# RTS GC tuning. Override per-deployment via the RTS_OPTS env var (no image rebuild needed).
+# The default profile favors LOW MEMORY (relay-friendly) over raw throughput:
+#   -A16m / -n4m : smaller chunked nursery -> lower baseline RSS, still scales across N cores
+#   -F1.5        : grow old-gen heap to 1.5x live data (GHC default 2.0) -> lower peak RSS
+#   -I0.3 -Iw600 : re-enable idle GC (at most once / 600s) so freed memory is reclaimed when quiet
+#   --disable-delayed-os-memory-return : hand freed pages straight back to the OS
+#   -qg -qb      : sequential GC (lower transient memory than parallel GC)
+# Throughput-critical block producers can opt back into the old profile by setting RTS_OPTS env:
+#   "-N${CPU_CORES} -I0 -A64m -qg -qb --disable-delayed-os-memory-return"
+: "${RTS_OPTS:=-N${CPU_CORES} -A16m -n4m -F1.5 -I0.3 -Iw600 -qg -qb --disable-delayed-os-memory-return}"
 : "${ENABLE_BACKUP:=N}"
 : "${ENABLE_RESTORE:=N}"
 : "${CNCLI_ENABLED:=N}"
