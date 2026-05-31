@@ -69,7 +69,7 @@ RUN ARCH="${TARGETARCH}" && \
     rm -f /tmp/mithril-signer.deb
 
 # --- nview (Blink Labs — raw binary) ---
-ARG NVIEW_VERSION=0.13.0
+ARG NVIEW_VERSION=0.14.0
 RUN ARCH="${TARGETARCH}" && \
     curl -sL -o /usr/local/bin/nview \
       "https://github.com/blinklabs-io/nview/releases/download/v${NVIEW_VERSION}/nview-v${NVIEW_VERSION}-linux-${ARCH}" && \
