@@ -186,19 +186,19 @@ spec:
           # Gating startup on 6000 keeps liveness suppressed until the node serves.
           startupProbe:
             tcpSocket:
-              port: 6000
+              port: cardano        # named serving port (port-agnostic; opens only after replay)
             initialDelaySeconds: 120
             periodSeconds: 30
             failureThreshold: 2880    # 24 hours grace for initial sync / replay
           livenessProbe:
             tcpSocket:
-              port: 6000
+              port: cardano
             initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 20
           readinessProbe:
             tcpSocket:
-              port: 6000
+              port: cardano
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 10
