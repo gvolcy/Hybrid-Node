@@ -94,15 +94,22 @@ spec:
                       sleep 1
                     done
                     echo "Timeout waiting for clean shutdown"
+          # Probes target the P2P serving port (cardano=3002), which only opens
+          # AFTER chunk-validation + ledger replay completes. This is critical:
+          # checking node.socket here is WRONG — the socket is created mid-startup,
+          # so a socket-based startupProbe passes early and lets the livenessProbe
+          # begin while the node is still replaying (3002 closed), killing it
+          # mid-replay in an endless loop on mainnet. Gating startup on 3002 keeps
+          # liveness suppressed until the node is genuinely serving.
           startupProbe:
-            exec:
-              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
-            initialDelaySeconds: 300
+            tcpSocket:
+              port: cardano
+            initialDelaySeconds: 120
             periodSeconds: 30
-            failureThreshold: 2880    # 24 hours grace for initial sync
+            failureThreshold: 2880    # 24 hours grace for initial sync / replay
           livenessProbe:
-            exec:
-              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            tcpSocket:
+              port: cardano
             initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 20
