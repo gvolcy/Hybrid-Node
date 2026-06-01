@@ -97,6 +97,15 @@ CNCLI_PIDS=()
 cleanup() {
     log "Received shutdown signal, cleaning up..."
 
+    # Signal cardano-node FIRST so its (slowest) clean shutdown starts
+    # immediately and runs concurrently with helper teardown. This also means a
+    # misbehaving helper (e.g. a mithril-signer that ignores SIGTERM) can never
+    # block the node from receiving its shutdown signal.
+    if [ -n "${NODE_PID}" ] && kill -0 "${NODE_PID}" 2>/dev/null; then
+        log "Stopping cardano-node (PID ${NODE_PID}) with SIGINT..."
+        kill -SIGINT "${NODE_PID}" 2>/dev/null
+    fi
+
     # Stop cncli background processes
     for pid in "${CNCLI_PIDS[@]}"; do
         if kill -0 "${pid}" 2>/dev/null; then
@@ -105,37 +114,39 @@ cleanup() {
         fi
     done
 
-    # Stop mithril-signer
+    # Stop mithril-signer (bounded wait so it can't stall shutdown)
     if [ -n "${SIGNER_PID}" ] && kill -0 "${SIGNER_PID}" 2>/dev/null; then
         log "Stopping mithril-signer (PID ${SIGNER_PID})..."
         kill -SIGTERM "${SIGNER_PID}" 2>/dev/null
+        ( sleep 15; kill -SIGKILL "${SIGNER_PID}" 2>/dev/null ) &
+        local sig_wd=$!
         wait "${SIGNER_PID}" 2>/dev/null || true
+        kill "${sig_wd}" 2>/dev/null || true
     fi
 
-    # Stop cardano-node with SIGINT (it expects SIGINT for graceful shutdown)
+    # Wait for cardano-node's clean shutdown (it was signalled above).
     if [ -n "${NODE_PID}" ] && kill -0 "${NODE_PID}" 2>/dev/null; then
-        log "Stopping cardano-node (PID ${NODE_PID}) with SIGINT..."
-        kill -SIGINT "${NODE_PID}" 2>/dev/null
-
-        # Wait up to 540s for clean shutdown. Breaks early as soon as the node
-        # process exits (kill -0 fails). Must stay under the pod's
-        # terminationGracePeriodSeconds (600s) so the node exits on its own
-        # rather than being SIGKILLed (which forces a full DB revalidation).
+        # Wait for a clean shutdown, up to 540s (must stay under the pod's
+        # terminationGracePeriodSeconds=600 so the node exits on its own rather
+        # than being SIGKILLed, which would force a full DB revalidation).
+        #
+        # Use `wait` (not a `kill -0` poll): `wait` blocks until the child
+        # exits AND reaps it. A `kill -0` poll would keep succeeding on a
+        # zombie (exited-but-unreaped) process and burn the full timeout even
+        # on a clean, fast shutdown. A background watchdog enforces the cap.
         local timeout=540
-        while kill -0 "${NODE_PID}" 2>/dev/null && [ "$timeout" -gt 0 ]; do
-            if [ -f "${DB_DIR}/clean" ]; then
-                log "Clean shutdown confirmed (db/clean marker found)"
-                break
-            fi
-            sleep 1
-            timeout=$((timeout - 1))
-        done
+        ( sleep "${timeout}"; kill -SIGKILL "${NODE_PID}" 2>/dev/null ) &
+        local watchdog=$!
 
-        if kill -0 "${NODE_PID}" 2>/dev/null; then
-            warn "Node didn't stop gracefully after 540s, sending SIGKILL"
-            kill -SIGKILL "${NODE_PID}" 2>/dev/null
-        else
+        wait "${NODE_PID}" 2>/dev/null
+
+        if kill -0 "${watchdog}" 2>/dev/null; then
+            # Node exited before the watchdog fired -> clean shutdown.
+            kill "${watchdog}" 2>/dev/null || true
+            wait "${watchdog}" 2>/dev/null || true
             log "cardano-node stopped gracefully"
+        else
+            warn "Node didn't stop within ${timeout}s, was SIGKILLed by watchdog"
         fi
     fi
 
@@ -1124,7 +1135,14 @@ NODE_CMD=$(build_node_cmd)
 log "Starting: ${NODE_CMD}"
 
 # 9. Launch cardano-node
-eval "${NODE_CMD}" &
+# IMPORTANT: use `exec` inside the backgrounded subshell so it REPLACES itself
+# with cardano-node. Without `exec`, `eval "${NODE_CMD}" &` leaves an
+# intermediate bash wrapper as the backgrounded process, so $! is the wrapper's
+# PID (not cardano-node's). The shutdown trap would then send SIGINT to the
+# wrapper bash, which never forwards it -> cardano-node never shuts down cleanly
+# -> SIGKILL at grace expiry -> full immutable-DB revalidation on next start.
+# With `exec`, $! is cardano-node's real PID and SIGINT reaches it directly.
+eval "exec ${NODE_CMD}" &
 NODE_PID=$!
 log "cardano-node started (PID ${NODE_PID})"
 
