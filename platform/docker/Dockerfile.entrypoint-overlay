@@ -1,0 +1,16 @@
+# Dockerfile.entrypoint-overlay — thin overlay that swaps ONLY the entrypoint +
+# healthcheck onto an already-built cardano image. Avoids a multi-hour source
+# rebuild when the only change is platform/bin/*.sh.
+#
+# Build:
+#   docker build -f platform/docker/Dockerfile.entrypoint-overlay \
+#     --build-arg BASE=ghcr.io/gvolcy/hybrid-node:cardano-11.0.1-nview0.14.0 \
+#     -t ghcr.io/gvolcy/hybrid-node:cardano-11.0.1-nview0.14.0-ep1 .
+ARG BASE=ghcr.io/gvolcy/hybrid-node:cardano-11.0.1-nview0.14.0
+FROM ${BASE}
+USER root
+COPY platform/bin/entrypoint.sh  /usr/local/bin/entrypoint.sh
+COPY platform/bin/healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh
+USER guild
+# ENTRYPOINT / WORKDIR / HEALTHCHECK inherited from the base image.
