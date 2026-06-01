@@ -1,0 +1,152 @@
+# bp-key-audit.yaml — Daily audit that a block producer holds ONLY hot keys in
+# plaintext. Any sensitive *.skey left decrypted (e.g. after a CNTools Decrypt
+# that was never re-encrypted) is reported to Discord and fails the job.
+#
+# Mirrors the existing *-kes-monitor pattern: reuses the <ns>-selfheal
+# ServiceAccount (already has pods/exec), bitnami/kubectl image, daily schedule.
+#
+# The Discord webhook is supplied out-of-band as a Secret (NOT in git):
+#   kubectl -n <ns> create secret generic bp-key-audit-discord \
+#       --from-literal=webhook='https://discord.com/api/webhooks/...'
+#
+# Apply on main1:
+#   kubectl apply -f chains/cardano/k3s/bp-key-audit.yaml
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cmainnet-bp-key-audit
+  namespace: cmainnet-bp
+  labels:
+    app: cmainnet-bp
+    component: key-audit
+spec:
+  schedule: "30 6 * * *"          # daily, 30m after kes-monitor
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 180
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: cmainnet-bp-selfheal
+          restartPolicy: Never
+          containers:
+            - name: key-audit
+              image: bitnami/kubectl:latest
+              env:
+                - name: NS
+                  value: "cmainnet-bp"
+                - name: DEPLOY
+                  value: "cmainnet-bp"
+                - name: POOL
+                  value: "volcy"
+                - name: DISCORD_WEBHOOK
+                  valueFrom:
+                    secretKeyRef:
+                      name: bp-key-audit-discord
+                      key: webhook
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -uo pipefail
+                  PRIV=/opt/cardano/cnode/priv
+                  POD=$(kubectl get pods -n "$NS" -l app="$DEPLOY" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then echo "ERROR: no BP pod in $NS"; exit 1; fi
+
+                  # Plaintext sensitive keys = any *.skey that is NOT a hot key.
+                  # Hot keys (kes/hot/vrf.skey) must stay plaintext; *.skey.gpg is fine.
+                  PLAIN=$(kubectl exec -n "$NS" "$POD" -- sh -c \
+                    "find $PRIV -type f -name '*.skey' ! -name 'kes.skey' ! -name 'hot.skey' ! -name 'vrf.skey' 2>/dev/null" \
+                    2>/dev/null | sort)
+                  COUNT=$(printf '%s\n' "$PLAIN" | grep -c . || true)
+
+                  echo "=== BP key audit: $DEPLOY (pool=$POOL) ==="
+                  echo "plaintext sensitive keys: $COUNT"
+                  printf '%s\n' "$PLAIN"
+
+                  if [ "${COUNT:-0}" -eq 0 ]; then
+                    echo "OK: only hot keys plaintext"
+                    exit 0
+                  fi
+
+                  # Build a Discord message (trim to first 25 paths, stay < 2000 chars).
+                  LIST=$(printf '%s\n' "$PLAIN" | sed "s#${PRIV}/##" | head -25 | sed 's/^/> /')
+                  MSG="🔴 **BP key audit: ${DEPLOY} (${POOL})**\nFound **${COUNT}** sensitive key(s) in PLAINTEXT on a hot block producer.\nRe-encrypt in CNTools (Wallet/Pool → Encrypt) or air-gap.\n${LIST}"
+                  if [ -n "${DISCORD_WEBHOOK:-}" ]; then
+                    PAYLOAD=$(printf '{"content":"%s"}' "$(printf '%b' "$MSG" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')")
+                    curl -sf -H 'Content-Type: application/json' -d "$PAYLOAD" "$DISCORD_WEBHOOK" >/dev/null \
+                      && echo "Discord alert sent" || echo "WARN: Discord post failed"
+                  fi
+                  exit 1
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: haiti-bp-key-audit
+  namespace: haiti-bp
+  labels:
+    app: haiti-bp
+    component: key-audit
+spec:
+  schedule: "30 6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 180
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: haiti-bp-selfheal
+          restartPolicy: Never
+          containers:
+            - name: key-audit
+              image: bitnami/kubectl:latest
+              env:
+                - name: NS
+                  value: "haiti-bp"
+                - name: DEPLOY
+                  value: "haiti-bp"
+                - name: POOL
+                  value: "silem"
+                - name: DISCORD_WEBHOOK
+                  valueFrom:
+                    secretKeyRef:
+                      name: bp-key-audit-discord
+                      key: webhook
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -uo pipefail
+                  PRIV=/opt/cardano/cnode/priv
+                  POD=$(kubectl get pods -n "$NS" -l app="$DEPLOY" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+                  if [ -z "$POD" ]; then echo "ERROR: no BP pod in $NS"; exit 1; fi
+
+                  PLAIN=$(kubectl exec -n "$NS" "$POD" -- sh -c \
+                    "find $PRIV -type f -name '*.skey' ! -name 'kes.skey' ! -name 'hot.skey' ! -name 'vrf.skey' 2>/dev/null" \
+                    2>/dev/null | sort)
+                  COUNT=$(printf '%s\n' "$PLAIN" | grep -c . || true)
+
+                  echo "=== BP key audit: $DEPLOY (pool=$POOL) ==="
+                  echo "plaintext sensitive keys: $COUNT"
+                  printf '%s\n' "$PLAIN"
+
+                  if [ "${COUNT:-0}" -eq 0 ]; then
+                    echo "OK: only hot keys plaintext"
+                    exit 0
+                  fi
+
+                  LIST=$(printf '%s\n' "$PLAIN" | sed "s#${PRIV}/##" | head -25 | sed 's/^/> /')
+                  MSG="🔴 **BP key audit: ${DEPLOY} (${POOL})**\nFound **${COUNT}** sensitive key(s) in PLAINTEXT on a hot block producer.\nRe-encrypt in CNTools (Wallet/Pool → Encrypt) or air-gap.\n${LIST}"
+                  if [ -n "${DISCORD_WEBHOOK:-}" ]; then
+                    PAYLOAD=$(printf '{"content":"%s"}' "$(printf '%b' "$MSG" | sed 's/\\/\\\\/g; s/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')")
+                    curl -sf -H 'Content-Type: application/json' -d "$PAYLOAD" "$DISCORD_WEBHOOK" >/dev/null \
+                      && echo "Discord alert sent" || echo "WARN: Discord post failed"
+                  fi
+                  exit 1
