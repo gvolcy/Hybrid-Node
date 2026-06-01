@@ -42,11 +42,14 @@ data:
     # --- Mithril relay (forward proxy) ---
     http_port 3132
 
-    # Only the mainnet BP host (Tailscale IP) may use this relay.
-    # Add additional BP source IPs here if more BPs are onboarded.
+    # Only approved BP hosts (Tailscale IPs) may use this relay.
+    #   100.103.96.35  = main1  (mainnet BPs: cmainnet-bp, haiti-bp)
+    #   100.125.84.24  = main2  (testnet BPs: preprod/preview volcy+silem)
     acl bp_nodes src 100.103.96.35/32
+    acl bp_nodes src 100.125.84.24/32
 
     # Only allow tunnelling to the Mithril aggregator over TLS.
+    # Covers mainnet, preprod and preview aggregators (all *.api.mithril.network).
     acl mithril_aggregator dstdomain .api.mithril.network
     acl SSL_ports port 443
     acl CONNECT method CONNECT
