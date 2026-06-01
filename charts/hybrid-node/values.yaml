@@ -199,8 +199,10 @@ hostname: ""
 strategy:
   type: Recreate
 
-# Graceful shutdown timeout (cardano-node needs up to 300s)
-terminationGracePeriodSeconds: 300
+# Graceful shutdown timeout. Must exceed the entrypoint's clean-shutdown wait
+# (~540s) so cardano-node flushes its ledger and exits cleanly; a SIGKILL
+# mid-flush forces a full immutable-DB revalidation (~50min on mainnet).
+terminationGracePeriodSeconds: 600
 
 # Liveness probe configuration
 livenessProbe:

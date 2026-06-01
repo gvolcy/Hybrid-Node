@@ -1,6 +1,6 @@
 # ============================================================================
 # Hybrid-Node Block Producer for K3s
-# Features: preStop graceful shutdown, NetworkPolicy, mithril-keeper, CNCLI,
+# Features: entrypoint-trap graceful shutdown, NetworkPolicy, mithril-keeper, CNCLI,
 #           PoolTool.io, all persistent volumes, disk-pressure toleration
 # ============================================================================
 # Usage:
@@ -83,7 +83,12 @@ spec:
       hostname: cardano-bp
       imagePullSecrets:
         - name: ghcr-creds
-      terminationGracePeriodSeconds: 300
+      # Must comfortably exceed the entrypoint's clean-shutdown wait (~540s) so
+      # cardano-node can flush its ledger and exit cleanly. If the pod is
+      # SIGKILLed mid-flush, the next start re-validates the entire immutable DB
+      # (~50min on mainnet). The entrypoint trap handles SIGTERM->SIGINT and
+      # detects process exit, so no preStop hook is needed.
+      terminationGracePeriodSeconds: 600
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
@@ -165,20 +170,12 @@ spec:
             - containerPort: 9090
               name: mithril
               protocol: TCP
-          lifecycle:
-            preStop:
-              exec:
-                command:
-                  - /bin/bash
-                  - -c
-                  - |
-                    killall -s SIGINT cardano-node 2>/dev/null || true
-                    echo "Sent SIGINT, waiting for clean shutdown..."
-                    for i in $(seq 1 280); do
-                      [ -f /opt/cardano/cnode/db/clean ] && echo "Clean shutdown confirmed" && exit 0
-                      sleep 1
-                    done
-                    echo "Timeout waiting for clean shutdown"
+          # No preStop hook: the entrypoint traps SIGTERM and sends SIGINT to
+          # cardano-node (the signal it shuts down cleanly on), then waits for the
+          # process to actually exit (breaks on `kill -0`, not on a non-existent
+          # db/clean marker). The previous preStop waited 280s for a marker that
+          # cardano-node never writes, burning the grace budget and forcing a
+          # SIGKILL -> unclean shutdown -> full DB revalidation on next start.
           # Probes target the P2P serving port (6000), which only opens AFTER
           # chunk-validation + ledger replay completes. A socket-based startupProbe
           # passes early (the socket is created mid-startup) and lets liveness begin

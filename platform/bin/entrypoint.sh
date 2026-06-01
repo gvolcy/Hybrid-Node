@@ -117,8 +117,11 @@ cleanup() {
         log "Stopping cardano-node (PID ${NODE_PID}) with SIGINT..."
         kill -SIGINT "${NODE_PID}" 2>/dev/null
 
-        # Wait up to 280s for clean shutdown (checks for db/clean marker)
-        local timeout=280
+        # Wait up to 540s for clean shutdown. Breaks early as soon as the node
+        # process exits (kill -0 fails). Must stay under the pod's
+        # terminationGracePeriodSeconds (600s) so the node exits on its own
+        # rather than being SIGKILLed (which forces a full DB revalidation).
+        local timeout=540
         while kill -0 "${NODE_PID}" 2>/dev/null && [ "$timeout" -gt 0 ]; do
             if [ -f "${DB_DIR}/clean" ]; then
                 log "Clean shutdown confirmed (db/clean marker found)"
@@ -129,7 +132,7 @@ cleanup() {
         done
 
         if kill -0 "${NODE_PID}" 2>/dev/null; then
-            warn "Node didn't stop gracefully after 280s, sending SIGKILL"
+            warn "Node didn't stop gracefully after 540s, sending SIGKILL"
             kill -SIGKILL "${NODE_PID}" 2>/dev/null
         else
             log "cardano-node stopped gracefully"

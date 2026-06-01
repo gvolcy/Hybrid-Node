@@ -119,20 +119,11 @@ spec:
               containerPort: {{ .Values.mithrilMetrics.port }}
               protocol: TCP
             {{- end }}
-          lifecycle:
-            preStop:
-              exec:
-                command:
-                  - /bin/bash
-                  - -c
-                  - |
-                    killall -s SIGINT cardano-node 2>/dev/null || true
-                    echo "Sent SIGINT, waiting for clean shutdown..."
-                    for i in $(seq 1 280); do
-                      [ -f /opt/cardano/cnode/db/clean ] && echo "Clean shutdown confirmed" && exit 0
-                      sleep 1
-                    done
-                    echo "Timeout waiting for clean shutdown"
+          # No preStop hook: the entrypoint traps SIGTERM and sends SIGINT to
+          # cardano-node, then waits for the process to actually exit. The old
+          # preStop waited 280s for a db/clean marker cardano-node never writes,
+          # which burned the grace budget and forced a SIGKILL -> unclean
+          # shutdown -> full DB revalidation on next start.
           livenessProbe:
             exec:
               command:
