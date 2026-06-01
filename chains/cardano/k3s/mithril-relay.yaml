@@ -1,0 +1,127 @@
+---
+# Mithril relay (Squid forward proxy) for Cardano mainnet block producers.
+#
+# Purpose: keep the block producer (BP) off the public internet. The BP's
+# mithril-signer routes to the aggregator THROUGH this relay (running on a
+# relay host) instead of connecting out directly.
+#
+# Deploy on a MAINNET RELAY host (e.g. main4 / mainnet1-relay), NOT on the BP host.
+# The BP reaches it over the private Tailscale network via hostPort 3132.
+#
+#   Signer (BP, main1) --tailscale--> Squid (relay host) --internet--> aggregator
+#
+# Wire the BP by adding to its mithril.env:
+#   HTTP_PROXY=http://<relay-tailscale-ip>:3132
+#   HTTPS_PROXY=http://<relay-tailscale-ip>:3132
+#
+# High availability (warm standby):
+#   This same manifest is deployed on two mainnet relay hosts:
+#     - PRIMARY : main4  Tailscale 100.110.37.42   (BPs point here)
+#     - STANDBY : main3  Tailscale 100.103.135.9   (ready, idle)
+#   The signer's HTTP(S)_PROXY targets a single address, so failover is manual
+#   and one line. If the primary relay is down, on each BP run:
+#
+#     ENV=/opt/cardano/cnode/mithril/mithril.env
+#     sed -i 's#100.110.37.42#100.103.135.9#g' "$ENV"      # primary -> standby
+#     pkill -x mithril-signer                               # entrypoint-less restart:
+#     # then relaunch the signer (see scripts/mithril/README.md) OR restart the pod.
+#
+#   Switch back by reversing the sed once the primary is healthy.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mithril-relay
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: squid-config
+  namespace: mithril-relay
+data:
+  squid.conf: |
+    # --- Mithril relay (forward proxy) ---
+    http_port 3132
+
+    # Only the mainnet BP host (Tailscale IP) may use this relay.
+    # Add additional BP source IPs here if more BPs are onboarded.
+    acl bp_nodes src 100.103.96.35/32
+
+    # Only allow tunnelling to the Mithril aggregator over TLS.
+    acl mithril_aggregator dstdomain .api.mithril.network
+    acl SSL_ports port 443
+    acl CONNECT method CONNECT
+
+    # Deny CONNECT to anything other than the safe TLS port.
+    http_access deny CONNECT !SSL_ports
+
+    # Allow approved BP nodes to reach only the Mithril aggregator.
+    http_access allow bp_nodes CONNECT mithril_aggregator
+    http_access allow bp_nodes mithril_aggregator
+
+    # Everything else is denied.
+    http_access deny all
+
+    # Hardening / hygiene.
+    via off
+    forwarded_for delete
+    request_header_access X-Forwarded-For deny all
+    httpd_suppress_version_string on
+    shutdown_lifetime 5 seconds
+    # Log to the image's writable dir (squid drops privileges to the 'proxy'
+    # user, which cannot write the container's /dev/stdout).
+    access_log /var/log/squid/access.log
+    cache_log /var/log/squid/cache.log
+    cache deny all
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mithril-relay
+  namespace: mithril-relay
+  labels:
+    app: mithril-relay
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mithril-relay
+  template:
+    metadata:
+      labels:
+        app: mithril-relay
+    spec:
+      containers:
+        - name: squid
+          image: ubuntu/squid:6.6-24.04_edge
+          ports:
+            - name: proxy
+              containerPort: 3132
+              hostPort: 3132
+          volumeMounts:
+            - name: squid-config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 3132
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3132
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: squid-config
+          configMap:
+            name: squid-config
