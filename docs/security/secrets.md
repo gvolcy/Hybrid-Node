@@ -42,27 +42,59 @@ Everything else — `cold.skey`, `cold.counter*`, `calidus.skey`, and the **enti
 air-gapped machine (main6) and USB cold storage **only**. The node never reads
 any of it.
 
-## Auditing & Air-gap Remediation
+## Auditing & At-rest Protection
 
-Two scripts enforce and remediate the "hot keys only" rule:
+The offline-only keys (`cold.skey`, `cold.counter*`, `calidus.skey`, and the
+entire `priv/wallet/` tree) must be protected at rest by **one** of:
+
+- **A) Air-gap** — keys live only on main6, not on the BP at all (strongest).
+- **B) CNTools encryption** — keys stay on the BP but GPG-symmetric
+  ("password") encrypted, i.e. present as `<name>.skey.gpg` with no plaintext
+  sibling. This is the chosen model here; it's lower-friction than air-gap.
+
+The hot set (`kes/hot.skey`, `vrf.skey`) **must stay plaintext** — the node
+reads it at runtime.
 
 ```bash
-# READ-ONLY audit — exits non-zero if any offline-only key is on a hot BP.
+# READ-ONLY audit — exits non-zero if any sensitive key is in plaintext.
+# `enc` = encrypted at rest (ok), `hot` = required plaintext (ok), `PLAIN` = risk.
 # Wire into CI / a CronJob / Alertmanager.
 NAMESPACES="cmainnet-bp haiti-bp" ./scripts/security/audit-bp-keys.sh
+```
 
-# Evacuate offline-only secrets to an encrypted (AES-256) archive.
-#   step 1 — archive + verify only (no deletion):
+### CNTools encryption (option B — the easy path)
+
+CNTools encrypts/decrypts keys with a passphrase on demand. After **any**
+operation that decrypts keys (KES rotation, wallet/pool actions), re-lock them:
+
+```text
+cntools.sh  →  [w] Wallet / [p] Pool  →  Encrypt   (repeat per wallet/pool)
+```
+
+> ⚠️ CNTools leaves keys **plaintext** after a Decrypt until you run Encrypt
+> again. A plaintext `cold.skey`/`payment.skey` on a live BP is the same
+> exposure as never encrypting. Always re-encrypt after use, and run the audit
+> to confirm `0 sensitive key(s) in PLAINTEXT`.
+
+Keep the passphrase **off** the BP host (password manager / your head), and a
+copy of the keys on main6 + USB cold storage in case the passphrase is lost.
+
+### Air-gap evacuation (option A — stronger)
+
+If you prefer keys never touch the hot host, evacuate them to an encrypted
+archive and remove them from the pod:
+
+```bash
+# step 1 — archive + verify only (no deletion):
 ./scripts/security/evacuate-cold-keys.sh cmainnet-bp
-#   step 2 — after copying the .gpg to main6 AND a USB stick, delete from pod:
+# step 2 — after copying the .gpg to main6 AND a USB stick, delete from pod:
 ./scripts/security/evacuate-cold-keys.sh cmainnet-bp '' --remove
 ```
 
-`evacuate-cold-keys.sh` is **safe by default**: it tars the whole `priv/` tree
-out of the pod, encrypts it, verifies the archive decrypts, and only deletes the
-offline-only secrets when run with `--remove` *and* after you confirm an offline
-copy exists. It always leaves `kes/hot.skey`, `vrf.skey`, `op.cert` and all
-public `*.vkey` files in place, so the node keeps producing blocks.
+`evacuate-cold-keys.sh` is safe by default: it tars `priv/` out of the pod,
+encrypts it, verifies it decrypts, and only deletes the offline-only secrets
+with `--remove` after you confirm an offline copy exists. It always leaves
+`kes/hot.skey`, `vrf.skey`, `op.cert` and the public `*.vkey` files in place.
 
 > ⚠️ **Never run `--remove` until the encrypted archive is verified on main6 and
 > on USB cold storage.** Cold/payment/stake keys are irrecoverable if lost.
