@@ -858,36 +858,57 @@ start_cncli_processes() {
             sleep 10
         done
 
-        # Give node time to fully start and open EKG/Prometheus ports
-        log "  [cncli] Waiting 30s for cardano-node ports..."
-        sleep 30
+        # Wait for cardano-node to actually open the EKG port.
+        # The Guild cncli.sh script uses `ss -lnpt` to verify the node PID is
+        # listening on the EKG port.  If we start cncli.sh before the port is
+        # open, it caches a stale PID and loops forever with:
+        #   "ERROR: You specified <port> as your EKG port, but it looks like
+        #    the cardano-node (PID: <stale>) is not listening on this port."
+        # A fixed sleep is not reliable — wait until EKG is actually reachable.
+        local ekg_wait_host="${EKG_HOST}"
+        [ "${ekg_wait_host}" = "0.0.0.0" ] && ekg_wait_host="127.0.0.1"
+        local ekg_wait=0
+        log "  [cncli] Waiting for EKG port ${ekg_wait_host}:${EKG_PORT}..."
+        while ! curl -sf -o /dev/null -m 2 "http://${ekg_wait_host}:${EKG_PORT}/" 2>/dev/null; do
+            sleep 5
+            ekg_wait=$((ekg_wait + 5))
+            if [ ${ekg_wait} -ge 300 ]; then
+                warn "  [cncli] EKG port not available after 300s, starting cncli anyway"
+                break
+            fi
+        done
+        log "  [cncli] EKG port ready after ${ekg_wait}s ✓"
 
-        mkdir -p "${GUILD_DB_DIR}"
+        # Extra settle time to ensure ss sees the correct PID binding
+        sleep 5
+        mkdir -p "${GUILD_DB_DIR}" "${LOGS_DIR}"
 
-        # Backup existing cncli database
-        if [ -f "${GUILD_DB_DIR}/cncli.db" ]; then
+        # Backup existing cncli database (guild layout: guild-db/cncli/cncli.db)
+        if [ -f "${GUILD_DB_DIR}/cncli/cncli.db" ]; then
             log "  [cncli] Found existing cncli database - preserving"
-            cp "${GUILD_DB_DIR}/cncli.db" "${GUILD_DB_DIR}/cncli.db.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+            cp "${GUILD_DB_DIR}/cncli/cncli.db" "${GUILD_DB_DIR}/cncli/cncli.db.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
         fi
 
         # Start PoolTool.io sendtip/sendslots if API key is available
         if [ -n "${PT_API_KEY}" ]; then
             log "  [cncli] Starting PoolTool.io sendtip..."
-            "${CNODE_HOME}/scripts/cncli.sh" ptsendtip >> "${GUILD_DB_DIR}/ptsendtip.log" 2>&1 &
+            "${CNODE_HOME}/scripts/cncli.sh" ptsendtip >> "${LOGS_DIR}/cncli-ptsendtip.log" 2>&1 &
             CNCLI_PIDS+=($!)
-            "${CNODE_HOME}/scripts/cncli.sh" ptsendslots >> "${GUILD_DB_DIR}/ptsendslots.log" 2>&1 &
+            "${CNODE_HOME}/scripts/cncli.sh" ptsendslots >> "${LOGS_DIR}/cncli-ptsendslots.log" 2>&1 &
             CNCLI_PIDS+=($!)
         else
             log "  [cncli] PT_API_KEY not set - skipping PoolTool.io (get key from pooltool.io)"
         fi
 
-        # Start core CNCLI processes
+        # Start core CNCLI processes.
+        # Log paths match what the cncli-keeper CronJob expects so that the
+        # keeper can detect stuck processes and restart them properly.
         log "  [cncli] Starting sync, leaderlog, validate..."
-        "${CNODE_HOME}/scripts/cncli.sh" sync >> "${GUILD_DB_DIR}/sync.log" 2>&1 &
+        "${CNODE_HOME}/scripts/cncli.sh" sync > "${LOGS_DIR}/cncli-sync.log" 2>&1 &
         CNCLI_PIDS+=($!)
-        "${CNODE_HOME}/scripts/cncli.sh" leaderlog >> "${GUILD_DB_DIR}/leader.log" 2>&1 &
+        "${CNODE_HOME}/scripts/cncli.sh" leaderlog > "${LOGS_DIR}/cncli-leaderlog.log" 2>&1 &
         CNCLI_PIDS+=($!)
-        "${CNODE_HOME}/scripts/cncli.sh" validate >> "${GUILD_DB_DIR}/validate.log" 2>&1 &
+        "${CNODE_HOME}/scripts/cncli.sh" validate > "${LOGS_DIR}/cncli-validate.log" 2>&1 &
         CNCLI_PIDS+=($!)
 
         log "✅ CNCLI processes started (${#CNCLI_PIDS[@]} processes)"
@@ -940,6 +961,14 @@ build_node_cmd() {
             priv_pool="${CNODE_HOME}/priv/pool/${POOL_NAME}"
         else
             priv_pool="${CNODE_HOME}/priv/pool"
+        fi
+
+        # Fix key file permissions — cardano-node refuses to start if VRF/KES
+        # key files have group or other permissions.  K8s fsGroup adds group
+        # bits to all mounted files, so we must strip them before every start.
+        if [ -d "${priv_pool}" ]; then
+            chmod 0600 "${priv_pool}"/*.skey "${priv_pool}"/op.cert "${priv_pool}"/node.cert "${priv_pool}"/opcert.cert 2>/dev/null || true
+            log "BP mode: Key file permissions secured (0600)" >&2
         fi
 
         # Try Guild naming: hot.skey, vrf.skey, op.cert

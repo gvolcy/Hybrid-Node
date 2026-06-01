@@ -14,7 +14,7 @@ Thanks for your interest in contributing! Hybrid-Node powers 17+ production bloc
 
 ```
 Hybrid-Node/
-├── bin/entrypoint.sh          # Unified entrypoint (1100+ lines)
+├── platform/bin/entrypoint.sh # Unified entrypoint (1100+ lines)
 ├── platform/docker/Dockerfile # Multi-stage Docker build
 ├── chains/                    # Chain-specific configs & K3s manifests
 │   ├── cardano/
@@ -50,7 +50,7 @@ make shell                    # Open a shell in the container
 ### Lint
 
 ```bash
-shellcheck -x -s bash bin/entrypoint.sh
+shellcheck -x -s bash platform/bin/entrypoint.sh
 ```
 
 ## What We're Looking For

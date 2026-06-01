@@ -201,10 +201,10 @@ jobs:
           #   SC2030/SC2031 — subshell variable modifications (intentional)
           shellcheck -x -s bash \
             -e SC2034 -e SC2317 -e SC2016 -e SC1091 -e SC2030 -e SC2031 \
-            bin/entrypoint.sh
+            platform/bin/entrypoint.sh
 
       - name: Lint healthcheck.sh
-        run: shellcheck -x -s bash bin/healthcheck.sh
+        run: shellcheck -x -s bash platform/bin/healthcheck.sh
 
       - name: Lint operator scripts
         run: |

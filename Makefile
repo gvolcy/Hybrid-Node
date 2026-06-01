@@ -82,7 +82,7 @@ helm-bp: ## Deploy BP via Helm for CHAIN
 	helm install $(CHAIN)-bp ./charts/hybrid-node --set image.tag=$(TAG) --set cardano.mode=bp --set cardano.network=$(or $(NETWORK),mainnet)
 
 lint: ## Run ShellCheck on all shell scripts
-	shellcheck -x -s bash bin/entrypoint.sh bin/healthcheck.sh
+	shellcheck -x -s bash platform/bin/entrypoint.sh platform/bin/healthcheck.sh
 	@echo "ShellCheck passed"
 
 lint-yaml: ## Lint YAML manifests
