@@ -16,6 +16,11 @@ Thumbs.db
 # Docker build cache
 .docker/
 
+# Agent / debug scratch files (terminal-capture workaround, ad-hoc kubectl patches)
+.tmp/
+.v.txt
+.sroll.txt
+
 # ============================================================================
 # POOL KEYS & SECRETS — NEVER COMMIT THESE
 # ============================================================================
