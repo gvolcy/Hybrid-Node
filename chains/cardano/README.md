@@ -189,8 +189,8 @@ kubectl apply -f chains/cardano/k3s/bp.yaml
 - Requires `POOL_ID` and `POOL_TICKER` env vars for full functionality.
 
 ### Graceful Shutdown
-- The entrypoint handles `SIGINT`/`SIGTERM` with a **280-second drain** to ensure clean shutdown.
-- Kubernetes `terminationGracePeriodSeconds` should be set to ≥ 300.
+- The entrypoint traps `SIGTERM`/`SIGINT` and forwards `SIGINT` to cardano-node so it flushes its ledger DB and exits cleanly (no preStop hook needed). The entrypoint waits up to **540s** for the node to exit, then a watchdog force-kills it.
+- Kubernetes `terminationGracePeriodSeconds` should be set to **600** (60s headroom over the 540s cap); a clean exit is usually only a few seconds.
 
 ---
 

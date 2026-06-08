@@ -37,7 +37,7 @@ version pins, and image tags — there is no ambiguous `latest` tag.
 |-------|-----------|--------------|-----------|
 | **Cardano** | `platform/docker/Dockerfile.cardano` | 11.0.1 | `ghcr.io/gvolcy/hybrid-node:cardano-11.0.1` |
 | **ApexFusion** | `platform/docker/Dockerfile.apexfusion` | 10.1.4 | `ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4` |
-| **Midnight** | Pre-built upstream image | 0.22.3 | `midnightntwrk/midnight-node:0.22.3` |
+| **Midnight** | Pre-built upstream image | 1.0.0 | `midnightntwrk/midnight-node:1.0.0` |
 
 Version pins for each chain live in `chains/<chain>/versions.env`:
 
@@ -84,7 +84,7 @@ GUILD_DEPLOY_BRANCH=main
 
 | Network | Image | Status |
 |---------|-------|--------|
-| Preview | `midnightntwrk/midnight-node:0.22.3` | ✅ Production |
+| Preview | `midnightntwrk/midnight-node:1.0.0` | ✅ Production |
 
 > ⚠️ Midnight uses its own Substrate-based node image — it does **not** use the shared Hybrid-Node Docker image.
 
@@ -242,7 +242,7 @@ make help
 
 ```bash
 # Cardano
-docker pull ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+docker pull ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 
 # ApexFusion
 docker pull ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
@@ -258,7 +258,7 @@ docker run -d \
   -e NODE_PORT=3001 \
   -v cardano-db:/opt/cardano/cnode/db \
   -p 3001:3001 \
-  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 ```
 
 ### Cardano Block Producer
@@ -275,7 +275,7 @@ docker run -d \
   -v cardano-db:/opt/cardano/cnode/db \
   -v cardano-keys:/opt/cardano/cnode/priv \
   -p 6000:6000 \
-  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 ```
 
 ### ApexFusion Relay
@@ -442,13 +442,13 @@ make build-all
 
 # Manual Docker build with version override
 docker build -f platform/docker/Dockerfile.cardano \
-  --build-arg NODE_VERSION=10.6.3 \
-  -t hybrid-node:cardano-10.6.3 .
+  --build-arg NODE_VERSION=11.0.1 \
+  -t hybrid-node:cardano-11.0.1 .
 
 # Multi-arch Cardano
 docker buildx build -f platform/docker/Dockerfile.cardano \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/gvolcy/hybrid-node:cardano-10.6.3 --push .
+  -t ghcr.io/gvolcy/hybrid-node:cardano-11.0.1 --push .
 
 # Multi-arch ApexFusion
 docker buildx build -f platform/docker/Dockerfile.apexfusion \

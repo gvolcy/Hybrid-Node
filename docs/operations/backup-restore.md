@@ -67,7 +67,7 @@ echo "[$(date +%Y%m%d-%H%M)] DB backup complete"
 
 ```bash
 # Stop the node first
-docker stop -t 300 cardano-relay
+docker stop -t 600 cardano-relay
 
 # Restore DB
 rsync -avz --delete main6:/backup/cardano/mainnet/db/ /opt/cardano/cnode/db/
@@ -86,7 +86,7 @@ docker run -d --name cardano-relay \
   -e NETWORK=mainnet \
   -e MITHRIL_DOWNLOAD=Y \
   -v cardano-db:/opt/cardano/cnode/db \
-  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 ```
 
 > ℹ️ Mithril bootstrap takes ~30 minutes for Cardano mainnet.

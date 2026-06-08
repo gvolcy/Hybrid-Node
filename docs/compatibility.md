@@ -4,27 +4,27 @@
 
 | Component | Cardano | ApexFusion | Notes |
 |-----------|---------|------------|-------|
-| cardano-node | 10.6.3 | 10.1.4 | Source-built from IntersectMBO |
-| cardano-cli | 10.15.1.0 | 9.4.1.0 | CLI version must match node era |
-| GHC | 9.6.6 | 9.6.6 | Haskell compiler |
+| cardano-node | 11.0.1 | 10.1.4 | Source-built from IntersectMBO |
+| cardano-cli | 11.0.0.0 | 9.4.1.0 | CLI version must match node era |
+| GHC | 9.6.7 | 9.6.6 | Haskell compiler |
 | Cabal | 3.12.1.0 | 3.12.1.0 | Build tool |
-| Mithril client | 0.12.38 | — | Not available for ApexFusion |
-| Mithril signer | 0.3.7 | — | Not available for ApexFusion |
+| Mithril client | 0.13.9 | — | Not available for ApexFusion |
+| Mithril signer | 1.0.0 | — | Not available for ApexFusion |
 | CNCLI | 6.7.0 | 6.7.0 | Leader logs, PoolTool |
-| nview | 0.13.0 | 0.13.0 | TUI node monitor |
-| txtop | 0.14.0 | 0.14.0 | Mempool viewer |
+| nview | 0.14.0 | 0.13.0 | TUI node monitor |
+| txtop | 0.15.0 | 0.14.0 | Mempool viewer |
 | Guild Operators | cardano-community/master | Scitz0/main | Different forks |
 | Base image | debian:bookworm-slim | debian:bookworm-slim | Shared |
-| Haskell image | blinklabs-io/haskell:9.6.7-3.12.1.0-3 | Same | Build stage only |
+| Haskell image | 9.6.7-3.12.1.0-3 | 9.6.6-3.12.1.0-3 | Build stage only (blinklabs-io/haskell) |
 
 ## Midnight
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| midnight-node | 0.22.3 | Pre-built from midnightntwrk |
-| cardano-node (companion) | Latest preview | IntersectMBO official image |
-| db-sync | Latest | IntersectMBO official image |
-| ogmios | Latest | cardanosolutions official image |
+| midnight-node | 1.0.0 | Pre-built from midnightntwrk |
+| cardano-node (companion) | 11.0.1 | IntersectMBO official image (preview) |
+| db-sync | 13.7.0.5 | IntersectMBO official image |
+| ogmios | v6.14.0 | cardanosolutions official image |
 | postgres | 15.3 | Database for db-sync |
 
 ## Infrastructure

@@ -19,8 +19,8 @@ docker images ghcr.io/gvolcy/hybrid-node --format '{{.Tag}} {{.CreatedAt}}' | so
 ### 2. Stop the current container
 
 ```bash
-# Graceful stop (280s shutdown for clean DB)
-docker stop -t 300 cardano-relay
+# Graceful stop (entrypoint waits up to 540s for a clean node exit)
+docker stop -t 600 cardano-relay
 docker rm cardano-relay
 ```
 

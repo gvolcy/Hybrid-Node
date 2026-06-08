@@ -2,11 +2,12 @@
 
 ## Graceful Restart (Preferred)
 
-The node writes a clean DB marker on shutdown. Always use graceful stops.
+The entrypoint traps SIGTERM and sends SIGINT to cardano-node so it flushes its
+ledger DB and exits cleanly. Always use graceful stops.
 
 ```bash
-# Stop with 300s timeout (280s for DB flush + 20s headroom)
-docker stop -t 300 cardano-relay
+# Stop with a 600s timeout (entrypoint waits up to 540s for a clean node exit)
+docker stop -t 600 cardano-relay
 
 # Start again
 docker start cardano-relay
@@ -31,8 +32,8 @@ If the node is unresponsive and won't stop gracefully:
 docker kill cardano-relay
 docker rm cardano-relay
 
-# Re-launch — the node will replay from the last clean marker
-docker run -d --name cardano-relay ... ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+# Re-launch — the node replays from its last on-disk ledger state
+docker run -d --name cardano-relay ... ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 ```
 
 **If the DB is corrupted after a force kill:**
@@ -44,7 +45,7 @@ docker run -d --name cardano-relay \
   -e NETWORK=mainnet \
   -e MITHRIL_DOWNLOAD=Y \
   -v cardano-db:/opt/cardano/cnode/db \
-  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 
 # Option 2: Restore from backup (required for ApexFusion)
 rsync -avz main6:/backup/apexfusion/afpm/db/ /opt/cardano/cnode/db/

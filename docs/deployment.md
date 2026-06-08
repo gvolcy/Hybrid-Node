@@ -13,7 +13,7 @@ This is the simplest path to get a node running.
 ### Step 1: Pull the image
 
 ```bash
-docker pull ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+docker pull ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 ```
 
 ### Step 2: Run the relay
@@ -30,7 +30,7 @@ docker run -d \
   -p 3001:3001 \
   -p 12798:12798 \
   --restart unless-stopped \
-  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 ```
 
 ### Step 3: Monitor sync progress
@@ -84,7 +84,7 @@ docker run -d \
   -v cardano-guild-db:/opt/cardano/cnode/guild-db \
   -p 6000:6000 \
   --restart unless-stopped \
-  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
+  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
 ```
 
 > ⚠️ **BP ports should NOT be public.** Only your relays should connect to the BP port.
@@ -190,16 +190,21 @@ helm install apex-bp ./charts/hybrid-node \
 
 ## Graceful Shutdown
 
-The container uses a 280-second graceful shutdown sequence:
+Shutdown is handled by the container entrypoint (PID 1), which traps SIGTERM and
+forwards SIGINT to cardano-node so it can flush its ledger DB and exit cleanly:
 
-1. K8s preStop hook (or `docker stop`) sends SIGINT to cardano-node
-2. Node flushes in-memory DB and writes `db/clean` marker
-3. Container waits for clean marker (up to 280s)
-4. `terminationGracePeriodSeconds: 300` provides 20s headroom
+1. K8s sends SIGTERM (or `docker stop`); the entrypoint traps it
+2. The entrypoint sends SIGINT to cardano-node, which flushes its in-memory DB
+3. CNCLI and mithril-signer helpers are stopped (mithril-signer bounded to 15s)
+4. The entrypoint waits for the node to exit (up to 540s; a watchdog SIGKILLs past that)
+5. `terminationGracePeriodSeconds: 600` leaves 60s headroom over the 540s cap
+
+No preStop hook is required — the entrypoint receives SIGTERM directly, so the
+signal always reaches cardano-node (a clean exit is usually only a few seconds).
 
 ```bash
-# Always use a long timeout for docker stop
-docker stop -t 300 cardano-relay
+# Use a long timeout for docker stop (≥ the 540s node-drain cap)
+docker stop -t 600 cardano-relay
 ```
 
 ---

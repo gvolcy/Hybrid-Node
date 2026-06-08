@@ -97,7 +97,7 @@ This isn't a toy project. Changes to `entrypoint.sh` or the Dockerfile affect pr
 - Test thoroughly before submitting
 - Don't introduce breaking changes to env var behavior
 - Preserve backward compatibility with existing K3s deployments
-- Be mindful of the 280-second graceful shutdown window
+- Be mindful of the graceful shutdown window (the entrypoint waits up to 540s for a clean node exit; `terminationGracePeriodSeconds` is 600)
 
 ## License
 

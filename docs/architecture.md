@@ -105,7 +105,7 @@ Each chain has its own Dockerfile and version pins:
 
 | Chain | Dockerfile | Node | CLI | Guild Source |
 |-------|-----------|------|-----|-------------|
-| Cardano | `Dockerfile.cardano` | 10.6.3 | 10.15.1.0 | cardano-community/guild-operators (master) |
+| Cardano | `Dockerfile.cardano` | 11.0.1 | 11.0.0.0 | cardano-community/guild-operators (master) |
 | ApexFusion | `Dockerfile.apexfusion` | 10.1.4 | 9.4.1.0 | Scitz0/guild-operators-apex (main) |
 | Midnight | Pre-built upstream | — | — | midnightntwrk/midnight-node |
 
@@ -156,19 +156,25 @@ Container Start
 ### Graceful Shutdown Sequence
 
 ```
-SIGTERM received (K8s pod termination)
+SIGTERM received (K8s pod termination / docker stop)
       │
       ▼
-┌─────────────────────────────────────────────┐
-│ 1. preStop hook sends SIGINT to cardano-node │
-│ 2. Node begins flushing in-memory DB         │
-│ 3. Wait for db/clean marker (up to 280s)     │
-│ 4. Stop CNCLI, Mithril signer               │
-│ 5. Container exits cleanly                    │
-│                                               │
-│ terminationGracePeriodSeconds: 300            │
-│ (20s headroom beyond the 280s drain)          │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ 1. Entrypoint (PID 1) traps SIGTERM and sends     │
+│    SIGINT straight to cardano-node                 │
+│ 2. Node flushes its in-memory ledger DB to disk    │
+│ 3. CNCLI + mithril-signer helpers stopped          │
+│    concurrently (mithril-signer bounded to 15s)    │
+│ 4. Entrypoint waits for the node to exit & reaps   │
+│    it (up to 540s; watchdog SIGKILLs if exceeded)  │
+│ 5. Container exits cleanly                          │
+│                                                    │
+│ terminationGracePeriodSeconds: 600                 │
+│ (60s headroom beyond the 540s node-drain cap)      │
+│                                                    │
+│ No preStop hook — the entrypoint receives SIGTERM  │
+│ directly, so the signal always reaches the node.   │
+└──────────────────────────────────────────────────┘
 ```
 
 ---
