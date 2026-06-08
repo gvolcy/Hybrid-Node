@@ -477,6 +477,77 @@ customise_configs() {
             sed -i 's/#ENABLE_CHATTR=false/ENABLE_CHATTR=true/g' "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null || true
         fi
     fi
+
+    # Patch CNTools getBalanceKoios for the Koios CSV column-order regression.
+    # Upstream requests address_utxos as text/csv and parses positionally; the
+    # public Koios API now returns columns in schema order (asset_list 2nd),
+    # so the JSON asset_list blob (full of commas) shreds the positional read
+    # and `$(( ... + _value ))` aborts, crashing "Show wallet" for any wallet
+    # holding native tokens. Re-parse the response as JSON via jq instead.
+    patch_cntools_koios_balance
+}
+
+# Replace CNTools getBalanceKoios with a JSON/jq parser (column-order safe).
+patch_cntools_koios_balance() {
+    local lib="${CNODE_HOME}/scripts/cntools.library"
+    [ -f "${lib}" ] || return 0
+    grep -q 'HYBRIDNODE_KOIOS_BALANCE_PATCH' "${lib}" 2>/dev/null && return 0
+    grep -q '^getBalanceKoios() {' "${lib}" 2>/dev/null || return 0
+
+    local patch_file="/tmp/.cntools-getBalanceKoios.patch"
+    cat > "${patch_file}" <<'PATCH_EOF'
+getBalanceKoios() {
+  # HYBRIDNODE_KOIOS_BALANCE_PATCH: parse Koios address_utxos as JSON (column-order safe)
+  declare -gA utxos=(); declare -gA utxos_cnt=(); declare -gA assets=(); declare -gA tx_in_arr=(); declare -gA asset_name_maxlen_arr=(); declare -gA asset_amount_maxlen_arr=()
+
+  if [[ -n ${KOIOS_API} && -n ${addr_list+x} ]]; then
+    printf -v addr_list_joined '\"%s\",' "${addr_list[@]}"
+    [[ $1 != false ]] && extended=true || extended=false
+    HEADERS=("${KOIOS_API_HEADERS[@]}" -H "Content-Type: application/json" -H "accept: application/json")
+    println ACTION "curl -sSL -f -X POST ${HEADERS[*]} -d '{\"_addresses\":[${addr_list_joined%,}],\"_extended\":${extended}}' ${KOIOS_API}/address_utxos?select=address,tx_hash,tx_index,value,asset_list"
+    ! address_utxo_list=$(curl -sSL -f -X POST "${HEADERS[@]}" -d '{"_addresses":['${addr_list_joined%,}'],"_extended":'${extended}'}' "${KOIOS_API}/address_utxos?select=address,tx_hash,tx_index,value,asset_list" 2>&1) && println "ERROR" "\n${FG_RED}KOIOS_API ERROR${NC}: ${address_utxo_list}\n" && return 1
+    [[ -z ${address_utxo_list} || ${address_utxo_list} = '[]' ]] && return
+    while IFS=$'\t' read -r _address _tx_hash _tx_index _value _asset_list_b64; do
+      [[ -z ${_address} ]] && continue
+      index_prefix="${_address},"
+      assets["${index_prefix}lovelace"]=$(( ${assets["${index_prefix}lovelace"]:-0} + _value ))
+      utxos["${index_prefix}${_tx_hash}#${_tx_index}. ADA"]=${_value}
+      utxos_cnt["${_address}"]=$(( ${utxos_cnt["${_address}"]:-0} + 1 ))
+      tx_in_arr["${_address}"]="${tx_in_arr["${_address}"]} --tx-in ${_tx_hash}#${_tx_index}"
+      if [[ $1 != false ]]; then
+        _asset_list=$(base64 -d <<< "${_asset_list_b64}" 2>/dev/null)
+        [[ -z ${_asset_list} || ${_asset_list} = 'null' ]] && continue
+        while IFS=$'\t' read -r _policy_id _asset_name _quantity; do
+          [[ -z ${_policy_id} ]] && continue
+          tname="$(hexToAscii ${_asset_name})"
+          tname="${tname//[![:print:]]/}"
+          [[ ${#tname} -gt ${asset_name_maxlen_arr["${_address}"]:-5} ]] && asset_name_maxlen_arr["${_address}"]=${#tname}
+          asset_amount_fmt="$(formatAsset ${_quantity})"
+          [[ ${#asset_amount_fmt} -gt ${asset_amount_maxlen_arr["${_address}"]:-12} ]] && asset_amount_maxlen_arr["${_address}"]=${#asset_amount_fmt}
+          assets["${index_prefix}${_policy_id}.${_asset_name}"]=$(( ${assets["${index_prefix}${_policy_id}.${_asset_name}"]:-0} + _quantity ))
+          utxos["${index_prefix}${_tx_hash}#${_tx_index}.${_policy_id}.${_asset_name}"]=${_quantity}
+        done < <( jq -cr '.[]? | [.policy_id, .asset_name, .quantity] | @tsv' <<< "${_asset_list}" )
+      fi
+    done < <( jq -r '.[] | [.address, .tx_hash, .tx_index, .value, ((.asset_list // []) | @json | @base64)] | @tsv' <<< "${address_utxo_list}" )
+  fi
+}
+PATCH_EOF
+
+    cp -a "${lib}" "${lib}.bak-koiosbal" 2>/dev/null || true
+    if awk -v fn="${patch_file}" '
+        BEGIN { while ((getline line < fn) > 0) repl = repl line "\n" }
+        /^getBalanceKoios\(\) \{/ { inblock=1; printf "%s", repl; next }
+        inblock && /^}/ { inblock=0; next }
+        inblock { next }
+        { print }
+    ' "${lib}" > "${lib}.new" 2>/dev/null && bash -n "${lib}.new" 2>/dev/null; then
+        mv "${lib}.new" "${lib}"
+        log "Patched CNTools getBalanceKoios (Koios JSON parser)"
+    else
+        rm -f "${lib}.new"
+        log "WARN: CNTools getBalanceKoios patch skipped (splice/syntax check failed)"
+    fi
+    rm -f "${patch_file}"
 }
 
 # ----- Configure pool information in Guild scripts -----
