@@ -63,7 +63,7 @@ jobs:
             DOCKERFILE="platform/docker/Dockerfile.cardano"
             # Read CLI version from versions.env
             CLI_VERSION=$(grep '^CLI_VERSION=' chains/cardano/versions.env | cut -d= -f2)
-            [ -z "$CLI_VERSION" ] && CLI_VERSION="10.15.1.0"
+            [ -z "$CLI_VERSION" ] && CLI_VERSION="11.0.0.0"
           elif [ "$CHAIN" = "apexfusion" ]; then
             DOCKERFILE="platform/docker/Dockerfile.apexfusion"
             CLI_VERSION=$(grep '^CLI_VERSION=' chains/apexfusion/versions.env | cut -d= -f2)

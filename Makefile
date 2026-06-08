@@ -13,8 +13,8 @@ CHAIN ?= cardano
 # Version defaults per chain
 # ============================================================================
 ifeq ($(CHAIN),cardano)
-  NODE_VERSION ?= 10.7.0
-  CLI_VERSION ?= 10.15.1.0
+  NODE_VERSION ?= 11.0.1
+  CLI_VERSION ?= 11.0.0.0
   DOCKERFILE := platform/docker/Dockerfile.cardano
   TAG := cardano-$(NODE_VERSION)
 else ifeq ($(CHAIN),apexfusion)
@@ -34,7 +34,7 @@ help: ## Show this help
 build: ## Build image for CHAIN (default: cardano)
 	docker build -f $(DOCKERFILE) --build-arg NODE_VERSION=$(NODE_VERSION) --build-arg CLI_VERSION=$(CLI_VERSION) -t $(IMAGE_NAME):$(TAG) .
 
-build-cardano: ## Build Cardano image (node 10.7.0)
+build-cardano: ## Build Cardano image (node 11.0.1)
 	$(MAKE) build CHAIN=cardano
 
 build-apexfusion: ## Build ApexFusion image (node 10.1.4)
@@ -46,7 +46,7 @@ push: ## Push CHAIN image to GHCR
 	docker push $(IMAGE_NAME):$(TAG)
 
 push-all: ## Push all chain images to GHCR
-	docker push $(IMAGE_NAME):cardano-10.7.0
+	docker push $(IMAGE_NAME):cardano-11.0.1
 	docker push $(IMAGE_NAME):apexfusion-10.1.4
 
 run-relay: ## Run as relay node for CHAIN

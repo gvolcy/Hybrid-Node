@@ -9,12 +9,12 @@ labels: 'bug'
 <!-- A clear description of what the bug is -->
 
 ## Environment
-- **Node Version**: <!-- e.g., 10.7.0 -->
+- **Node Version**: <!-- e.g., 11.0.1 -->
 - **Chain**: <!-- cardano / apexfusion / midnight -->
 - **Network**: <!-- mainnet / preprod / preview -->
 - **Mode**: <!-- relay / bp -->
 - **Deployment**: <!-- Docker / Helm+K3s / K8s -->
-- **Image Tag**: <!-- e.g., ghcr.io/gvolcy/hybrid-node:10.7.0 -->
+- **Image Tag**: <!-- e.g., ghcr.io/gvolcy/hybrid-node:cardano-11.0.1 -->
 
 ## Steps to Reproduce
 1. 

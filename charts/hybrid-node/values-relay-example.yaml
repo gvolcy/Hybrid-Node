@@ -3,7 +3,7 @@
 
 image:
   repository: ghcr.io/gvolcy/hybrid-node
-  tag: "cardano-10.6.3"
+  tag: "cardano-11.0.1"
 
 cardano:
   network: mainnet
