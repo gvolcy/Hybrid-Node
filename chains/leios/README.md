@@ -20,6 +20,42 @@ This directory contains Ouroboros Leios (Musashi Dojo testnet) configuration and
 
 ---
 
+## Architecture
+
+Leios reuses the shared Hybrid-Node platform (same entrypoint, Helm chart, and
+K3s patterns as Cardano/ApexFusion). Chain separation happens at the **binary +
+genesis + consensus layer**, not the platform layer.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│         cardano-node (leios-prototype branch)            │
+│                                                          │
+│   ┌────────────────────────────────────────────────┐    │
+│   │   Ouroboros Leios  (over Ouroboros Praos)        │   │
+│   │   • Praos ranking blocks (RB) = base security    │   │
+│   │   • Endorser blocks (EB) = extra throughput      │   │
+│   │   • Committee validation before ledger inclusion │   │
+│   └────────────────────────────────────────────────┘    │
+│                                                          │
+│   ┌──────────────────────┐  ┌────────────────────────┐  │
+│   │ 5 genesis eras        │  │ Leios SQLite store     │  │
+│   │ byron→…→conway+       │  │ leios.db (EB tx data)  │  │
+│   │ DIJKSTRA              │  │ LeiosDbConfig          │  │
+│   └──────────────────────┘  └────────────────────────┘  │
+│                                                          │
+│   Guild Operators tooling · CNCLI · nview · txtop        │
+│   Mithril: NOT available (sync from bootstrap peer)      │
+└──────────────────────────────────────────────────────────┘
+        │ NETWORK=leios (magic 164)
+        ▼
+  leios-node.play.dev.cardano.org:3001  (Musashi Dojo bootstrap)
+```
+
+Full platform-wide architecture (host topology, build pipeline, port map) lives in
+[docs/architecture.md](../../docs/architecture.md#leios--musashi-dojo-stack).
+
+---
+
 ## Key Differences from Cardano
 
 | Feature | Cardano | Leios (Musashi) |

@@ -34,6 +34,7 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 │  │ Midnight    │  │ AI Memory   │                                    │
 │  │ Guild       │  │ Cold Keys   │                                    │
 │  │ AFPT        │  │ (offline)   │                                    │
+│  │ Leios       │  │             │                                    │
 │  └─────────────┘  └─────────────┘                                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -43,7 +44,7 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 | Host | Role | Networks | Notes |
 |------|------|----------|-------|
 | **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
-| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight | All non-production workloads. |
+| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, Leios | All non-production workloads. |
 | **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm | Primary relay. Runs K3s cluster (Discord bots). |
 | **main4** | Relays | Cardano mainnet, ApexFusion afpm | Secondary relay for redundancy. |
 | **main5** | Relays + AI | Cardano mainnet | Tertiary relay. AI sandbox (Ollama, local models). |
@@ -82,11 +83,14 @@ Hybrid-Node
 │   ├── mainnet (afpm) → BP (main1) + Relays (main3, main4)
 │   └── testnet (afpt) → main2
 │
+├── Leios (Ouroboros Leios — prototype)
+│   └── musashi (leios) → main2 (Musashi Dojo testnet, magic 164)
+│
 ├── Midnight
 │   └── preview        → main2 (K3s stack)
 │
 └── Shared Platform
-    ├── Docker images   → Dockerfile.cardano, Dockerfile.apexfusion
+    ├── Docker images   → Dockerfile.cardano, Dockerfile.apexfusion, Dockerfile.leios
     ├── Entrypoint      → platform/bin/entrypoint.sh (1100+ lines)
     ├── Health check    → platform/bin/healthcheck.sh
     ├── Helm chart      → charts/hybrid-node/
@@ -107,7 +111,13 @@ Each chain has its own Dockerfile and version pins:
 |-------|-----------|------|-----|-------------|
 | Cardano | `Dockerfile.cardano` | 11.0.1 | 11.0.0.0 | cardano-community/guild-operators (master) |
 | ApexFusion | `Dockerfile.apexfusion` | 10.1.4 | 9.4.1.0 | Scitz0/guild-operators-apex (main) |
+| Leios | `Dockerfile.leios` | `leios-prototype` branch (reports 11.0.1-leios-prototype) | built from source (same branch) | cardano-community/guild-operators (master) |
 | Midnight | Pre-built upstream | — | — | midnightntwrk/midnight-node |
+
+> Leios builds **both** `cardano-node` and `cardano-cli` from the `leios-prototype`
+> branch (the branch's `cabal.project` pins patched `ouroboros-consensus` /
+> `ouroboros-network`), so it does not consume a tagged release or the prebuilt
+> `cardano-cli` used by the other chains.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -214,7 +224,76 @@ not mounted as files:
 
 ---
 
+## Leios / Musashi Dojo Stack
+
+Leios (Ouroboros Leios) is the [Musashi Dojo](https://www.musashi.network/) public
+testnet for Cardano's next-generation high-throughput consensus (CIP-0164). It uses
+the shared `cardano-node` lineage and the same Hybrid-Node entrypoint/Helm/K3s
+platform as Cardano and ApexFusion, but on a **prototype** build with extra layers.
+
+### How it differs from Cardano/ApexFusion
+
+| Aspect | Cardano / ApexFusion | Leios (Musashi) |
+|--------|----------------------|-----------------|
+| Node binary | Tagged release | **Prototype** `leios-prototype` branch (reports `11.0.1-leios-prototype`) |
+| Consensus | Ouroboros Praos | Ouroboros **Leios** over Praos (endorser blocks + committee validation) |
+| Ledger eras | 4 (byron→conway) | **5** — adds **Dijkstra** (`dijkstra-genesis.json`) |
+| Extra store | — | **Leios SQLite DB** (`leios.db`, `LeiosDbConfig`) for endorser-block txs |
+| Network magic | per-network | **164** (`--testnet-magic 164`) |
+| Bootstrap | topology localRoots | bootstrap peer `leios-node.play.dev.cardano.org:3001` + `peer-snapshot.json` |
+| Mithril | available (Cardano) | **not available** — sync from bootstrap peer |
+| Block producer | KES + VRF + op.cert | additionally needs **BLS keys** (`--shelley-bls-key`) — pending upstream |
+
+### Consensus data flow (Leios layer)
+
+```
+                Praos chain (base security)
+                        │
+   ┌────────────────────┼────────────────────┐
+   │   BP forges a ranking block (RB) as in Praos
+   │                    │
+   │   Leios layer adds endorser blocks (EB):
+   │     • EBs reference extra txs Praos leaves out
+   │     • diffused + stored in leios.db (SQLite)
+   │     • committee validates EBs before ledger inclusion
+   └────────────────────┼────────────────────┘
+                        ▼
+            Higher throughput, same Praos security
+```
+
+### Runtime specifics (entrypoint)
+
+The shared [entrypoint](../platform/bin/entrypoint.sh) handles `NETWORK=leios`:
+
+- Downloads configs from cardano-playground `next-2026-05-15` (incl. the 5th era
+  `dijkstra-genesis.json` and `peer-snapshot.json` referenced by topology)
+- Maps `--testnet-magic 164` for `cardano-cli` queries
+- Skips Mithril (unavailable for Leios)
+- Relay-first; BP forging deferred until BLS key support lands
+
+### Image build
+
+```bash
+make build-leios                 # builds from the leios-prototype branch
+# override if upstream moves the branch:
+make build-leios NODE_BUILD_REF=leios-prototype \
+                 NODE_REPO=https://github.com/IntersectMBO/cardano-node.git
+```
+
+---
+
 ## Port Map
+
+### Leios / Musashi Dojo
+
+| Service | Port | Protocol | Notes |
+|---------|------|----------|-------|
+| cardano-node (relay) | 3001 | TCP | Public — peers with `leios-node.play.dev.cardano.org:3001` |
+| cardano-node (BP) | 3001 | TCP | Private — relay-only (BP pending BLS support) |
+| Prometheus metrics | 12798 | HTTP | Internal only |
+| EKG | 12788 | HTTP | Internal only |
+| Leios DB | — | SQLite | `leios.db` (endorser-block tx store) |
+| Node socket | — | Unix | `/opt/cardano/cnode/sockets/node.socket` |
 
 ### Cardano / ApexFusion
 
@@ -244,8 +323,8 @@ not mounted as files:
 ## Design Principles
 
 1. **Chain Separation** — Each blockchain has its own Dockerfile, version pins, configs, and K3s manifests
-2. **Shared Platform** — Entrypoint, healthcheck, and Helm chart logic are shared across Cardano/ApexFusion
-3. **Network Selection at Runtime** — The `NETWORK` environment variable selects which chain and network to run
+2. **Shared Platform** — Entrypoint, healthcheck, and Helm chart logic are shared across Cardano/ApexFusion/Leios
+3. **Network Selection at Runtime** — The `NETWORK` environment variable selects which chain and network to run (`leios` → Musashi Dojo, magic 164)
 4. **Operator-Focused** — Designed for stake pool operators running production infrastructure
 5. **Kubernetes-Native** — First-class K3s/K8s support with Helm charts and raw manifests
 6. **No Ambiguous Tags** — Images are tagged `<chain>-<version>`, never just `latest`
