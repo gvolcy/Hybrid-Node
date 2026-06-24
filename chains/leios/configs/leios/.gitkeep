@@ -1,0 +1,5 @@
+# Optional Leios/Musashi config overrides (network code: leios).
+# This directory name MUST equal the NETWORK value ("leios") because the
+# entrypoint resolves overrides at /opt/cardano/cnode/hybrid-configs/${NETWORK}/.
+# Drop config.json / topology.json here to override the runtime download
+# (see platform/bin/entrypoint.sh setup_network_configs).

@@ -22,11 +22,21 @@ else ifeq ($(CHAIN),apexfusion)
   CLI_VERSION ?= 9.4.1.0
   DOCKERFILE := platform/docker/Dockerfile.apexfusion
   TAG := apexfusion-$(NODE_VERSION)
+else ifeq ($(CHAIN),leios)
+  NODE_VERSION ?= 11.0.1
+  CLI_VERSION ?= 11.0.0.0
+  # Leios uses a PROTOTYPE branch, not a release tag. Override if needed:
+  #   make build-leios NODE_BUILD_REF=<branch> NODE_REPO=<git-url>
+  # The node reports "11.0.1-leios-prototype"; the git branch is "leios-prototype".
+  NODE_BUILD_REF ?= leios-prototype
+  NODE_REPO ?= https://github.com/IntersectMBO/cardano-node.git
+  DOCKERFILE := platform/docker/Dockerfile.leios
+  TAG := leios-$(NODE_VERSION)
 else
-  $(error Unknown CHAIN=$(CHAIN). Use: cardano, apexfusion)
+  $(error Unknown CHAIN=$(CHAIN). Use: cardano, apexfusion, leios)
 endif
 
-.PHONY: help build build-cardano build-apexfusion build-all push run-relay run-bp shell version versions clean clean-all lint lint-yaml lint-docker lint-all helm-relay helm-bp logs logs-bp status
+.PHONY: help build build-cardano build-apexfusion build-leios _build-leios build-all push run-relay run-bp shell version versions clean clean-all lint lint-yaml lint-docker lint-all helm-relay helm-bp logs logs-bp status
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-22s %s\n", $$1, $$2}'
@@ -40,7 +50,18 @@ build-cardano: ## Build Cardano image (node 11.0.1)
 build-apexfusion: ## Build ApexFusion image (node 10.1.4)
 	$(MAKE) build CHAIN=apexfusion
 
-build-all: build-cardano build-apexfusion ## Build all chain images
+build-leios: ## Build Leios/Musashi image (prototype node; set NODE_BUILD_REF)
+	$(MAKE) _build-leios CHAIN=leios
+
+# Internal: re-entered with CHAIN=leios so TAG/NODE_BUILD_REF/NODE_REPO resolve
+_build-leios:
+	docker build -f $(DOCKERFILE) \
+	  --build-arg NODE_REPO=$(NODE_REPO) \
+	  --build-arg NODE_BUILD_REF=$(NODE_BUILD_REF) \
+	  --build-arg CLI_VERSION=$(CLI_VERSION) \
+	  -t $(IMAGE_NAME):$(TAG) .
+
+build-all: build-cardano build-apexfusion ## Build all chain images (leios excluded: prototype ref)
 
 push: ## Push CHAIN image to GHCR
 	docker push $(IMAGE_NAME):$(TAG)
@@ -64,6 +85,7 @@ version: ## Show version info for CHAIN image
 versions: ## Show pinned versions for all chains
 	@echo "=== Cardano ===" && grep -E "^[A-Z]" chains/cardano/versions.env
 	@echo "" && echo "=== ApexFusion ===" && grep -E "^[A-Z]" chains/apexfusion/versions.env
+	@echo "" && echo "=== Leios / Musashi ===" && grep -E "^[A-Z]" chains/leios/versions.env
 	@echo "" && echo "=== Midnight ===" && grep -E "^[A-Z]" chains/midnight/versions.env
 
 clean: ## Remove containers and volumes for CHAIN
@@ -92,6 +114,7 @@ lint-yaml: ## Lint YAML manifests
 lint-docker: ## Lint all Dockerfiles with hadolint
 	hadolint platform/docker/Dockerfile.cardano
 	hadolint platform/docker/Dockerfile.apexfusion
+	hadolint platform/docker/Dockerfile.leios
 	@echo "Dockerfile lint passed"
 
 lint-all: lint lint-yaml lint-docker ## Run all linters

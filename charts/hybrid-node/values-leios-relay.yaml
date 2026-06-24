@@ -1,0 +1,39 @@
+# Example: Ouroboros Leios — Musashi Dojo Testnet Relay
+# Usage: helm install musashi-relay ./charts/hybrid-node -f charts/hybrid-node/values-leios-relay.yaml
+#
+# NOTE: Leios runs on a PROTOTYPE cardano-node build. Build + push the image
+#       first (see platform/docker/Dockerfile.leios), then deploy.
+#       Network magic 164. Mithril is NOT available — node syncs from the
+#       bootstrap peer leios-node.play.dev.cardano.org:3001.
+
+image:
+  repository: ghcr.io/gvolcy/hybrid-node
+  tag: "leios-11.0.1"
+
+cardano:
+  network: leios           # Ouroboros Leios (Musashi Dojo, magic 164)
+  mode: relay
+  port: 3001
+  cpuCores: 4
+  mithrilDownload: "N"     # Mithril not available for Leios testnet
+  customPeers: ""
+
+resources:
+  requests:
+    memory: "8Gi"
+    cpu: "2"
+  limits:
+    memory: "16Gi"
+    cpu: "4"
+
+persistence:
+  db:
+    enabled: true
+    size: 50Gi
+
+service:
+  type: NodePort
+  port: 3001
+
+metrics:
+  enabled: true

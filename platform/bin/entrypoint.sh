@@ -645,7 +645,9 @@ setup_network_configs() {
         afpt)    BASE_URL="https://raw.githubusercontent.com/Scitz0/guild-operators-apex/main/files/configs/afpt"
                  IS_APEX=true
                  log "ApexFusion Prime Testnet (Vector chain)" ;;
-        *)       err "Unknown network: ${NETWORK}. Supported: mainnet, preview, preprod, guild, afpm, afpt"; exit 1 ;;
+        leios)   BASE_URL="https://raw.githubusercontent.com/input-output-hk/cardano-playground/refs/heads/next-2026-05-15/docs/environments-pre/leios"
+                 log "Ouroboros Leios — Musashi Dojo testnet (magic 164)" ;;
+        *)       err "Unknown network: ${NETWORK}. Supported: mainnet, preview, preprod, guild, afpm, afpt, leios"; exit 1 ;;
     esac
 
     # Config file precedence: CLI override > hybrid-configs > network mismatch > existing > download
@@ -693,7 +695,12 @@ setup_network_configs() {
     fi
 
     # Download genesis files for the requested network (always refresh to ensure correct network)
-    for genesis in byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json; do
+    # Leios (Musashi Dojo) introduces a 5th era genesis: dijkstra-genesis.json
+    local genesis_files="byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json"
+    if [ "${NETWORK}" = "leios" ]; then
+        genesis_files="${genesis_files} dijkstra-genesis.json"
+    fi
+    for genesis in ${genesis_files}; do
         log "Downloading ${genesis} for ${NETWORK}..."
         curl -sS -o "${CONFIG_DIR}/${genesis}" "${BASE_URL}/${genesis}" 2>/dev/null || \
             warn "Could not download ${genesis} (may not exist for this network)"
@@ -714,6 +721,19 @@ setup_network_configs() {
         log "Downloading ${ckpt_file} for ${NETWORK}..."
         curl -sS -o "${CONFIG_DIR}/${ckpt_file}" "${BASE_URL}/${ckpt_file}" 2>/dev/null || \
             warn "Could not download ${ckpt_file} (may not exist for this network)"
+    fi
+
+    # Leios (Musashi Dojo): topology.json references a peer snapshot file.
+    # Fetch the file named by peerSnapshotFile (default peer-snapshot.json) so the
+    # node doesn't fail on a missing reference.
+    if [ "${NETWORK}" = "leios" ] && [ -f "${CONFIG_DIR}/topology.json" ]; then
+        local snap_file
+        snap_file=$(jq -r '.peerSnapshotFile // "peer-snapshot.json"' "${CONFIG_DIR}/topology.json" 2>/dev/null)
+        if [ -n "${snap_file}" ] && [ "${snap_file}" != "null" ]; then
+            log "Downloading ${snap_file} for leios..."
+            curl -sS -o "${CONFIG_DIR}/${snap_file}" "${BASE_URL}/${snap_file}" 2>/dev/null || \
+                warn "Could not download ${snap_file} (may not exist for this network)"
+        fi
     fi
 
     # Add custom peers to topology if specified
@@ -1106,6 +1126,7 @@ get_network_flag() {
         preprod) echo "--testnet-magic 1" ;;
         guild)   echo "--testnet-magic 141" ;;
         afpt)    echo "--testnet-magic 3311" ;;
+        leios)   echo "--testnet-magic 164" ;;
         *)       echo "--mainnet" ;;
     esac
 }
