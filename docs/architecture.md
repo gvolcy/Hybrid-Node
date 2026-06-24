@@ -43,10 +43,10 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 | Host | Role | Networks | Notes |
 |------|------|----------|-------|
 | **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
-| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight | All non-production workloads. |
+| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, Leios BPs | All non-production workloads. Leios BPs (leios-volcy, leios-silem). |
 | **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, Leios (leiosT1) | Primary relay. Runs K3s cluster (Discord bots, leiosT1). |
-| **main4** | Relays | Cardano mainnet, ApexFusion afpm | Secondary relay for redundancy. |
-| **main5** | Relays + AI | Cardano mainnet | Tertiary relay. AI sandbox (Ollama, local models). |
+| **main4** | Relays | Cardano mainnet, ApexFusion afpm, Leios (leiosT2) | Secondary relay for redundancy. |
+| **main5** | Relays + AI | Cardano mainnet, Leios (leiosT3, pending) | Tertiary relay. AI sandbox (Ollama, local models). |
 | **main6** | NAS / Storage | — | Backup target. DB snapshots, AI memory, cold key storage (offline). |
 
 ### Network Security
@@ -83,7 +83,10 @@ Hybrid-Node
 │   └── testnet (afpt) → main2
 │
 ├── Leios (Ouroboros Leios — prototype)
-│   └── musashi (leios) → Relay leiosT1 (main3, magic 164) — IOG prebuilt image
+│   └── musashi (leios) → Relays leiosT1 (main3), leiosT2 (main4),
+│                          leiosT3 (main5, pending)
+│                          BPs leios-volcy + leios-silem (main2, sync-only —
+│                          forging pending upstream BLS) — magic 164, IOG prebuilt image
 │
 ├── Midnight
 │   └── preview        → main2 (K3s stack)

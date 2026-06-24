@@ -1,0 +1,161 @@
+# ============================================================================
+# leios-volcy — Leios / Musashi Dojo Block Producer on K3s (main2)
+# ----------------------------------------------------------------------------
+# Runs the prototype cardano-node in BLOCK-PRODUCER mode (KES + VRF + op.cert)
+# using the official IOG Leios image (binaries + baked configs). Topology is
+# private: it peers only with our relays leiosT1 (main3) and leiosT2 (main4)
+# over Tailscale, no public/ledger peers (useLedgerAfterSlot: -1).
+#
+# NOTE: Leios *forging* is not yet possible upstream — cardano-node has no
+# --shelley-bls-key flag and the pool registration cert has no BLS fields yet.
+# This node therefore syncs and is BP-ready (keys incl. BLS+PoP are generated
+# under /data/leios/leios-volcy/priv) but will not forge/vote until upstream
+# ships BLS support and the pool is registered on-chain. Add --shelley-bls-key
+# to the command and re-register once available.
+#
+# Keys (host): /data/leios/leios-volcy/priv  (cold/kes/vrf/op.cert + bls.*)
+# Apply:       kubectl apply -f leios-volcy.yaml
+# ============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: leios-volcy
+  labels:
+    network: leios
+    role: bp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leios-volcy
+  namespace: leios-volcy
+  labels:
+    app: leios-volcy
+    network: leios
+    role: bp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: leios-volcy
+  template:
+    metadata:
+      labels:
+        app: leios-volcy
+        network: leios
+        role: bp
+    spec:
+      hostname: leios-volcy
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: cardano-node
+          image: ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CARDANO_NODE_NETWORK_ID
+              value: "164"
+            - name: CARDANO_NODE_SOCKET_PATH
+              value: "/data/node.socket"
+            - name: PORT
+              value: "6000"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              mkdir -p /data
+              cp -rf /app/config/. /data/
+              find /data -maxdepth 1 -type f -name '*.json' -exec chmod u+w {} +
+              cat > /data/topology.json <<'TOPO'
+              {
+                "bootstrapPeers": [
+                  {"address": "100.103.135.9", "port": 3010},
+                  {"address": "100.110.37.42", "port": 3010}
+                ],
+                "localRoots": [
+                  {"accessPoints": [
+                    {"address": "100.103.135.9", "port": 3010},
+                    {"address": "100.110.37.42", "port": 3010}
+                  ], "advertise": false, "trustable": true, "valency": 2}
+                ],
+                "publicRoots": [{"accessPoints": [], "advertise": false}],
+                "useLedgerAfterSlot": -1
+              }
+              TOPO
+              cd /data
+              mkdir -p db
+              echo "Starting leios-volcy BP: $(cardano-node --version | head -1)"
+              exec cardano-node run \
+                --config config.json \
+                --topology topology.json \
+                --database-path db \
+                --socket-path node.socket \
+                --host-addr 0.0.0.0 \
+                --port 6000 \
+                --shelley-kes-key /priv/kes.skey \
+                --shelley-vrf-key /priv/vrf.skey \
+                --shelley-operational-certificate /priv/op.cert
+          ports:
+            - containerPort: 6000
+              hostPort: 6000
+              name: bp
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: bp
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 240
+          livenessProbe:
+            tcpSocket:
+              port: bp
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: bp
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          volumeMounts:
+            - mountPath: /data
+              name: data
+            - mountPath: /priv
+              name: priv
+              readOnly: true
+      volumes:
+        - name: data
+          hostPath:
+            path: /data/leios/leios-volcy/data
+            type: DirectoryOrCreate
+        - name: priv
+          hostPath:
+            path: /data/leios/leios-volcy/priv
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: leios-volcy
+  namespace: leios-volcy
+  labels:
+    app: leios-volcy
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6000
+      targetPort: 6000
+      name: bp
+  selector:
+    app: leios-volcy

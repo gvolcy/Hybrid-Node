@@ -149,9 +149,27 @@ leios/
 ├── configs/
 │   └── leios/               # Optional config overrides (dir name == NETWORK)
 └── k3s/
-    ├── leiost1.yaml         # leiosT1 relay (Option A — prebuilt IOG image, deployed on main3)
-    └── relay.yaml           # Generic relay (Option B — Hybrid-Node image)
+    ├── leiost1.yaml         # leiosT1 relay (Option A — prebuilt IOG image, main3)
+    ├── leiost2.yaml         # leiosT2 relay (Option A — prebuilt IOG image, main4)
+    ├── leiost3.yaml         # leiosT3 relay (Option A — prebuilt IOG image, main5)
+    ├── relay.yaml           # Generic relay (Option B — Hybrid-Node image)
+    └── main2/
+        ├── leios-volcy.yaml # VOLCY block producer (main2)
+        └── leios-silem.yaml # SILEM block producer (main2)
 ```
+
+### Fleet
+
+| Node | Role | Host | Port | Status |
+|------|------|------|------|--------|
+| `leiosT1` | relay | main3 | 3010 | deployed |
+| `leiosT2` | relay | main4 | 3010 | deployed |
+| `leiosT3` | relay | main5 | 3010 | pending (host offline) |
+| `leios-volcy` | block producer | main2 | 6000 | deployed (sync-only; forging pending BLS) |
+| `leios-silem` | block producer | main2 | 6001 | deployed (sync-only; forging pending BLS) |
+
+The two BPs run privately — their topology peers **only** with `leiosT1`/`leiosT2`
+(over Tailscale), no public or ledger peers.
 
 ---
 
@@ -167,13 +185,31 @@ leios/
 
 ---
 
-## Block Producer (Not Yet Supported)
+## Block Producers (sync-only — forging pending BLS)
 
-BP mode needs **BLS keys** in addition to the standard KES/VRF/op.cert set, and
-the registration certificate fields (`--bls-verification-key-file`, `--bls-pop-file`)
-plus the node flag `--shelley-bls-key` are still pending in `cardano-cli` and the
-ledger. Track [ouroboros-leios#776](https://github.com/input-output-hk/ouroboros-leios/issues/776).
-A `values-leios-bp.yaml` and `k3s/bp.yaml` will be added once BLS support lands.
+Two BPs (`leios-volcy`, `leios-silem`) are deployed on main2 via
+[`k3s/main2/`](k3s/main2/). They run the prototype `cardano-node` with the
+standard **KES + VRF + op.cert** credentials and a private topology (peering
+only with `leiosT1`/`leiosT2`), so they **sync** and are BP-ready.
+
+**They do not forge yet.** Verified against the prototype binaries:
+
+| Capability | `cardano-cli` (`dijkstra node ...`) | Status |
+|------------|-------------------------------------|--------|
+| Generate BLS key / hash / PoP | `key-gen-BLS`, `key-hash-BLS`, `issue-pop-BLS` | ✅ available |
+| Register BLS in pool cert | `stake-pool registration-certificate --bls-*` | ❌ not yet |
+| Forge with BLS | `cardano-node run --shelley-bls-key` | ❌ not yet |
+
+Each pool's full key set — including `bls.{vkey,skey,hash,pop}` — is already
+generated and stored on main2 at `/data/leios/<pool>/priv`. Once upstream ships
+the BLS registration cert fields and the node startup flag, forging is enabled by
+(1) adding `--shelley-bls-key /priv/bls.skey` to the deployment command and
+(2) registering each pool on-chain (with BLS verification key + PoP, pledge, and
+staked tADA from the faucet). Track
+[ouroboros-leios#776](https://github.com/input-output-hk/ouroboros-leios/issues/776)
+and [cardano-cli#1355](https://github.com/IntersectMBO/cardano-cli/pull/1355).
+
+> ⚠️ Keys live only on the host (`/data/leios/<pool>/priv`) and are **not** committed.
 
 ---
 

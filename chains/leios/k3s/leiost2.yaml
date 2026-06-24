@@ -1,0 +1,112 @@
+# ============================================================================
+# leiosT2 — Leios / Musashi Dojo relay on K3s (main4)
+# Redundant relay (peer of leiosT1). Uses the official IOG prebuilt Leios
+# testnet relay image: bakes in pinned cardano-playground configs (incl.
+# dijkstra genesis + peer snapshot) and runs cardano-node as a non-block-
+# producing relay against leios-node.play.dev.cardano.org:3001 (magic 164).
+#
+#   image: ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest
+#
+# K8s names must be lowercase, so the resources are "leiost2" (= leiosT2).
+# Apply:  kubectl apply -f leiost2.yaml
+# ============================================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: leiost2
+  labels:
+    network: leios
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leiost2
+  namespace: leiost2
+  labels:
+    app: leiost2
+    network: leios
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: leiost2
+  template:
+    metadata:
+      labels:
+        app: leiost2
+        network: leios
+    spec:
+      hostname: leiost2
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: cardano-node
+          image: ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: WORKING_DIR
+              value: "/data"
+            - name: PORT
+              value: "3010"
+            - name: HOST_ADDR
+              value: "0.0.0.0"
+            - name: CARDANO_NODE_NETWORK_ID
+              value: "164"
+            - name: CARDANO_NODE_SOCKET_PATH
+              value: "/data/node.socket"
+          ports:
+            - containerPort: 3010
+              hostPort: 3010
+              name: p2p
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: p2p
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 240
+          livenessProbe:
+            tcpSocket:
+              port: p2p
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 10
+          readinessProbe:
+            tcpSocket:
+              port: p2p
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          volumeMounts:
+            - mountPath: /data
+              name: data
+      volumes:
+        - name: data
+          hostPath:
+            path: /data/leios/leiost2
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: leiost2
+  namespace: leiost2
+  labels:
+    app: leiost2
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3010
+      targetPort: 3010
+      name: p2p
+  selector:
+    app: leiost2
