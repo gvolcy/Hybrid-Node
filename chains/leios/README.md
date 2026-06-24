@@ -91,9 +91,35 @@ See [platform/docker/Dockerfile.leios](../../platform/docker/Dockerfile.leios) (
 
 ## Quick Start
 
-### Docker — Relay
+There are two image options for a Leios relay:
+
+| Option | Image | Build | Includes | Use when |
+|--------|-------|-------|----------|----------|
+| **A — Prebuilt (IOG)** | `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest` | none (pull) | node + cli + pinned configs | You just want a synced relay fast |
+| **B — Hybrid-Node** | `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` | `make build-leios` (~1–2h source compile) | + Guild tooling, healthcheck, entrypoint | You want full platform consistency |
+
+> The deployed **`leiosT1`** relay (main3) currently runs **Option A** — the official
+> IOG prebuilt image. It listens on port **3010**, stores everything under `/data`,
+> and bootstraps from `leios-node.play.dev.cardano.org:3001` out of the box.
+
+### Option A — Prebuilt IOG relay (deployed as `leiosT1`)
 
 ```bash
+# Docker
+docker run -d --name leios-relay \
+  -e PORT=3010 -e CARDANO_NODE_NETWORK_ID=164 \
+  -v leios-data:/data \
+  -p 3010:3010 \
+  ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest
+
+# K3s (leiosT1)
+kubectl apply -f chains/leios/k3s/leiost1.yaml
+```
+
+### Option B — Hybrid-Node relay (requires `make build-leios`)
+
+```bash
+# Docker
 docker run -d \
   --name musashi-relay \
   -e NETWORK=leios \
@@ -103,17 +129,11 @@ docker run -d \
   -p 3001:3001 \
   -p 12798:12798 \
   ghcr.io/gvolcy/hybrid-node:leios-11.0.1
-```
 
-### Kubernetes (K3s)
-
-```bash
+# K3s
 kubectl apply -f chains/leios/k3s/relay.yaml
-```
 
-### Helm
-
-```bash
+# Helm
 helm install musashi-relay ./charts/hybrid-node \
   -f charts/hybrid-node/values-leios-relay.yaml
 ```
@@ -129,7 +149,8 @@ leios/
 ├── configs/
 │   └── leios/               # Optional config overrides (dir name == NETWORK)
 └── k3s/
-    └── relay.yaml           # Musashi Dojo relay deployment
+    ├── leiost1.yaml         # leiosT1 relay (Option A — prebuilt IOG image, deployed on main3)
+    └── relay.yaml           # Generic relay (Option B — Hybrid-Node image)
 ```
 
 ---

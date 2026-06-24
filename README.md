@@ -1,6 +1,6 @@
 # 🔀 Hybrid-Node
 
-**Multi-chain node deployment framework for Cardano, ApexFusion, and Midnight using Docker,
+**Multi-chain node deployment framework for Cardano, ApexFusion, Midnight, and Leios using Docker,
 Helm, and K3s.**
 
 [![Lint](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml)
@@ -9,9 +9,9 @@ Helm, and K3s.**
 [![Security](https://github.com/gvolcy/Hybrid-Node/actions/workflows/security.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Hybrid-Node is an operator-focused deployment framework for running Cardano, ApexFusion, and
-Midnight blockchain nodes in production. Built with Docker, Helm, and K3s, it provides modular,
-production-friendly deployment workflows for relay and block producer environments.
+Hybrid-Node is an operator-focused deployment framework for running Cardano, ApexFusion,
+Midnight, and Leios blockchain nodes in production. Built with Docker, Helm, and K3s, it provides
+modular, production-friendly deployment workflows for relay and block producer environments.
 
 ## Why This Exists
 
@@ -24,7 +24,8 @@ graceful shutdown, and multi-pool key management out of the box. One image per c
 Deploy in seconds.
 
 > 🟢 **Production-validated** — Running across 17 nodes: Cardano mainnet (VOLCY & SILEM stake
-> pools), ApexFusion Vector (AFPM/AFPT), and Midnight Preview networks.
+> pools), ApexFusion Vector (AFPM/AFPT), and Midnight Preview networks. Plus the **Leios /
+> Musashi Dojo** testnet relay (`leiosT1`, main3).
 
 ---
 
@@ -38,6 +39,7 @@ version pins, and image tags — there is no ambiguous `latest` tag.
 | **Cardano** | `platform/docker/Dockerfile.cardano` | 11.0.1 | `ghcr.io/gvolcy/hybrid-node:cardano-11.0.1` |
 | **ApexFusion** | `platform/docker/Dockerfile.apexfusion` | 10.1.4 | `ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4` |
 | **Midnight** | Pre-built upstream image | 1.0.0 | `midnightntwrk/midnight-node:1.0.0` |
+| **Leios** | `platform/docker/Dockerfile.leios` *(or IOG prebuilt)* | `leios-prototype` | `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` *(or `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest`)* |
 
 Version pins for each chain live in `chains/<chain>/versions.env`:
 
@@ -88,7 +90,7 @@ GUILD_DEPLOY_BRANCH=main
 
 > ⚠️ Midnight uses its own Substrate-based node image — it does **not** use the shared Hybrid-Node Docker image.
 
-> 📖 Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md) · [Midnight](chains/midnight/README.md)
+> 📖 Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md) · [Midnight](chains/midnight/README.md) · [Leios](chains/leios/README.md)
 
 ---
 
@@ -191,12 +193,18 @@ Hybrid-Node/
 │   │   ├── configs/                #     afpm (mainnet), afpt (testnet)
 │   │   └── k3s/                    #     bp.yaml, relay.yaml, testnet-relay.yaml
 │   │
-│   └── midnight/                   #   ← Midnight chain (Substrate-based)
+│   ├── midnight/                   #   ← Midnight chain (Substrate-based)
+│   │   ├── README.md
+│   │   ├── versions.env            #     Pre-built image version
+│   │   ├── configs/                #     preview
+│   │   └── k3s/                    #     namespace.yaml, midnight-node.yaml,
+│   │                               #     cardano-stack.yaml
+│   │
+│   └── leios/                      #   ← Leios chain (Ouroboros Leios / Musashi Dojo)
 │       ├── README.md
-│       ├── versions.env            #     Pre-built image version
-│       ├── configs/                #     preview
-│       └── k3s/                    #     namespace.yaml, midnight-node.yaml,
-│                                   #     cardano-stack.yaml
+│       ├── versions.env            #     Prototype node pins + network params
+│       ├── configs/                #     leios (magic 164)
+│       └── k3s/                    #     leiost1.yaml, relay.yaml
 │
 ├── charts/                         # Helm charts
 │   ├── hybrid-node/                #   Shared chart (Cardano/ApexFusion)

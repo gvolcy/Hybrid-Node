@@ -34,7 +34,6 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 │  │ Midnight    │  │ AI Memory   │                                    │
 │  │ Guild       │  │ Cold Keys   │                                    │
 │  │ AFPT        │  │ (offline)   │                                    │
-│  │ Leios       │  │             │                                    │
 │  └─────────────┘  └─────────────┘                                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -44,8 +43,8 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 | Host | Role | Networks | Notes |
 |------|------|----------|-------|
 | **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
-| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, Leios | All non-production workloads. |
-| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm | Primary relay. Runs K3s cluster (Discord bots). |
+| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight | All non-production workloads. |
+| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, Leios (leiosT1) | Primary relay. Runs K3s cluster (Discord bots, leiosT1). |
 | **main4** | Relays | Cardano mainnet, ApexFusion afpm | Secondary relay for redundancy. |
 | **main5** | Relays + AI | Cardano mainnet | Tertiary relay. AI sandbox (Ollama, local models). |
 | **main6** | NAS / Storage | — | Backup target. DB snapshots, AI memory, cold key storage (offline). |
@@ -84,7 +83,7 @@ Hybrid-Node
 │   └── testnet (afpt) → main2
 │
 ├── Leios (Ouroboros Leios — prototype)
-│   └── musashi (leios) → main2 (Musashi Dojo testnet, magic 164)
+│   └── musashi (leios) → Relay leiosT1 (main3, magic 164) — IOG prebuilt image
 │
 ├── Midnight
 │   └── preview        → main2 (K3s stack)
