@@ -39,9 +39,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # from the prototype branch. The branch's cabal.project pins the patched
 # ouroboros-consensus / ouroboros-network commits, so a plain build resolves them.
 RUN echo "Building cardano-node (${NODE_BUILD_REF}) for Leios..." && \
-    git clone --depth 1 --branch ${NODE_BUILD_REF} \
+    git clone --depth 50 --branch leios-prototype \
       "${NODE_REPO}" /build/cardano-node && \
     cd /build/cardano-node && \
+    if [ "${NODE_BUILD_REF}" != "leios-prototype" ]; then git checkout "${NODE_BUILD_REF}"; fi && \
     echo "package cardano-crypto-praos"     >  cabal.project.local && \
     echo "  flags: -external-libsodium-vrf" >> cabal.project.local && \
     cabal update && \

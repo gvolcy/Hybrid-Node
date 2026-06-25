@@ -1,20 +1,9 @@
 # ============================================================================
 # leios-silem — Leios / Musashi Dojo Block Producer on K3s (main2)
-# ----------------------------------------------------------------------------
-# Runs the prototype cardano-node in BLOCK-PRODUCER mode (KES + VRF + op.cert)
-# using the official IOG Leios image (binaries + baked configs). Topology is
-# private: it peers only with our relays leiosT1 (main3) and leiosT2 (main4)
-# over Tailscale, no public/ledger peers (useLedgerAfterSlot: -1).
-#
-# NOTE: Leios *forging* is not yet possible upstream — cardano-node has no
-# --shelley-bls-key flag and the pool registration cert has no BLS fields yet.
-# This node therefore syncs and is BP-ready (keys incl. BLS+PoP are generated
-# under /data/leios/leios-silem/priv) but will not forge/vote until upstream
-# ships BLS support and the pool is registered on-chain. Add --shelley-bls-key
-# to the command and re-register once available.
-#
-# Keys (host): /data/leios/leios-silem/priv  (cold/kes/vrf/op.cert + bls.*)
-# Apply:       kubectl apply -f leios-silem.yaml
+# Option B (Hybrid-Node): ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+# Private topology via CUSTOM_PEERS -> leiosT1/leiosT2 (Tailscale :3010).
+# Keys: /data/leios/leios-silem/priv  |  Wallet: /data/leios/leios-silem/wallet
+# Apply: kubectl apply -f leios-silem.yaml
 # ============================================================================
 ---
 apiVersion: v1
@@ -49,76 +38,69 @@ spec:
         role: bp
     spec:
       hostname: leios-silem
-      terminationGracePeriodSeconds: 120
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: cardano-node
-          image: ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest
+          image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
           imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/entrypoint.sh"]
           env:
+            - name: NETWORK
+              value: "leios"
+            - name: NODE_MODE
+              value: "bp"
+            - name: NODE_PORT
+              value: "6001"
+            - name: CNODE_PORT
+              value: "6001"
+            - name: POOL_DIR
+              value: "/opt/cardano/cnode/priv/pool"
+            - name: CUSTOM_PEERS
+              value: "100.103.135.9:3010,100.110.37.42:3010"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: UPDATE_CHECK
+              value: "N"
+            - name: CPU_CORES
+              value: "2"
             - name: CARDANO_NODE_NETWORK_ID
               value: "164"
             - name: CARDANO_NODE_SOCKET_PATH
-              value: "/data/node.socket"
-            - name: PORT
-              value: "6001"
-          command:
-            - /bin/bash
-            - -c
-            - |
-              set -euo pipefail
-              mkdir -p /data
-              cp -rf /app/config/. /data/
-              find /data -maxdepth 1 -type f -name '*.json' -exec chmod u+w {} +
-              cat > /data/topology.json <<'TOPO'
-              {
-                "bootstrapPeers": [
-                  {"address": "100.103.135.9", "port": 3010},
-                  {"address": "100.110.37.42", "port": 3010}
-                ],
-                "localRoots": [
-                  {"accessPoints": [
-                    {"address": "100.103.135.9", "port": 3010},
-                    {"address": "100.110.37.42", "port": 3010}
-                  ], "advertise": false, "trustable": true, "valency": 2}
-                ],
-                "publicRoots": [{"accessPoints": [], "advertise": false}],
-                "useLedgerAfterSlot": -1
-              }
-              TOPO
-              cd /data
-              mkdir -p db
-              echo "Starting leios-silem BP: $(cardano-node --version | head -1)"
-              exec cardano-node run \
-                --config config.json \
-                --topology topology.json \
-                --database-path db \
-                --socket-path node.socket \
-                --host-addr 0.0.0.0 \
-                --port 6001 \
-                --shelley-kes-key /priv/kes.skey \
-                --shelley-vrf-key /priv/vrf.skey \
-                --shelley-operational-certificate /priv/op.cert
+              value: "/opt/cardano/cnode/sockets/node.socket"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
           ports:
             - containerPort: 6001
               hostPort: 6001
               name: bp
               protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
           startupProbe:
             tcpSocket:
               port: bp
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 15
             failureThreshold: 240
           livenessProbe:
-            tcpSocket:
-              port: bp
-            initialDelaySeconds: 60
+            exec:
+              command: ["/bin/bash", "/usr/local/bin/healthcheck.sh"]
+            initialDelaySeconds: 120
             periodSeconds: 30
             failureThreshold: 10
           readinessProbe:
-            tcpSocket:
-              port: bp
-            initialDelaySeconds: 20
+            exec:
+              command: ["/bin/bash", "/usr/local/bin/healthcheck.sh"]
+            initialDelaySeconds: 60
             periodSeconds: 15
             failureThreshold: 10
           resources:
@@ -129,19 +111,50 @@ spec:
               cpu: "4"
               memory: "8Gi"
           volumeMounts:
-            - mountPath: /data
-              name: data
-            - mountPath: /priv
-              name: priv
+            - mountPath: /opt/cardano/cnode/db
+              name: db
+            - mountPath: /opt/cardano/cnode/files
+              name: files
+            - mountPath: /opt/cardano/cnode/sockets
+              name: sockets
+            - mountPath: /opt/cardano/cnode/logs
+              name: logs
+            - mountPath: /opt/cardano/cnode/guild-db
+              name: guild-db
+            - mountPath: /opt/cardano/cnode/priv/pool
+              name: pool-keys
+              readOnly: true
+            - mountPath: /wallet
+              name: wallet
               readOnly: true
       volumes:
-        - name: data
+        - name: db
           hostPath:
-            path: /data/leios/leios-silem/data
+            path: /data/leios/leios-silem/data/db
             type: DirectoryOrCreate
-        - name: priv
+        - name: files
+          hostPath:
+            path: /data/leios/leios-silem/data/files
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /data/leios/leios-silem/data/sockets
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/leios/leios-silem/data/logs
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: /data/leios/leios-silem/data/guild-db
+            type: DirectoryOrCreate
+        - name: pool-keys
           hostPath:
             path: /data/leios/leios-silem/priv
+            type: Directory
+        - name: wallet
+          hostPath:
+            path: /data/leios/leios-silem/wallet
             type: Directory
 ---
 apiVersion: v1

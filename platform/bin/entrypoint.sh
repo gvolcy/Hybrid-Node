@@ -689,6 +689,14 @@ setup_network_configs() {
     elif [ -f "${HYBRID_CONFIG_DIR}/${NETWORK}/topology.json" ]; then
         log "Using hybrid topology override for ${NETWORK}"
         cp "${HYBRID_CONFIG_DIR}/${NETWORK}/topology.json" "${CONFIG_DIR}/topology.json"
+    elif [ "${NETWORK}" = "leios" ]; then
+        # Leios: guild-deploy seeds a Cardano *mainnet* topology (backbone peers),
+        # which is wrong for Musashi Dojo. Always pull the Leios topology so the
+        # node bootstraps from leios-node.play.dev.cardano.org and picks up the
+        # peerSnapshotFile reference. (BP mode with CUSTOM_PEERS still overrides
+        # this below via add_custom_peers.)
+        log "Downloading ${NETWORK} topology.json (force refresh over guild default)..."
+        curl -sS -o "${CONFIG_DIR}/topology.json" "${BASE_URL}/topology.json"
     elif [ ! -f "${CONFIG_DIR}/topology.json" ]; then
         log "Downloading ${NETWORK} topology.json..."
         curl -sS -o "${CONFIG_DIR}/topology.json" "${BASE_URL}/topology.json"
@@ -1088,6 +1096,12 @@ build_node_cmd() {
             CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
             CMD="${CMD} --shelley-operational-certificate ${priv_pool}/node.cert"
             log "BP mode: KES keys loaded from ${priv_pool} (CoinCashew naming)" >&2
+        # Leios / common SPO layout: kes.skey, vrf.skey, op.cert
+        elif [ -f "${priv_pool}/kes.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/op.cert" ]; then
+            CMD="${CMD} --shelley-kes-key ${priv_pool}/kes.skey"
+            CMD="${CMD} --shelley-vrf-key ${priv_pool}/vrf.skey"
+            CMD="${CMD} --shelley-operational-certificate ${priv_pool}/op.cert"
+            log "BP mode: KES keys loaded from ${priv_pool} (kes/op.cert naming)" >&2
         # Try alt naming: hot.skey, vrf.skey, opcert.cert
         elif [ -f "${priv_pool}/hot.skey" ] && [ -f "${priv_pool}/vrf.skey" ] && [ -f "${priv_pool}/opcert.cert" ]; then
             CMD="${CMD} --shelley-kes-key ${priv_pool}/hot.skey"

@@ -17,9 +17,9 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 │  │             │  │             │  │             │  │             │  │
 │  │ ApexFusion  │  │ ApexFusion  │  │ ApexFusion  │  │ AI Sandbox  │  │
 │  │ BP (afpm)   │  │ Relay       │  │ Relay       │  │ Ollama      │  │
-│  │             │  │             │  │             │  │             │  │
-│  │ VOLCY Pool  │  │ Discord     │  │             │  │             │  │
-│  │ SILEM Pool  │  │ Bots (K3s)  │  │             │  │             │  │
+│  │             │  │ Leios       │  │ Leios       │  │ Leios       │  │
+│  │ VOLCY Pool  │  │ leiosT1     │  │ leiosT2     │  │ leiosT3     │  │
+│  │ SILEM Pool  │  │ Discord     │  │             │  │ (pending)   │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │
 │         │                │                │                │          │
 │         └────────────────┴────────────────┴────────────────┘          │
@@ -34,6 +34,9 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 │  │ Midnight    │  │ AI Memory   │                                    │
 │  │ Guild       │  │ Cold Keys   │                                    │
 │  │ AFPT        │  │ (offline)   │                                    │
+│  │ Leios BPs   │  │             │                                    │
+│  │ leios-volcy │  │             │                                    │
+│  │ leios-silem │  │             │                                    │
 │  └─────────────┘  └─────────────┘                                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -43,10 +46,10 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 | Host | Role | Networks | Notes |
 |------|------|----------|-------|
 | **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
-| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, Leios BPs | All non-production workloads. Leios BPs (leios-volcy, leios-silem). |
-| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, Leios (leiosT1) | Primary relay. Runs K3s cluster (Discord bots, leiosT1). |
-| **main4** | Relays | Cardano mainnet, ApexFusion afpm, Leios (leiosT2) | Secondary relay for redundancy. |
-| **main5** | Relays + AI | Cardano mainnet, Leios (leiosT3, pending) | Tertiary relay. AI sandbox (Ollama, local models). |
+| **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, **Leios BPs** | Non-production workloads. **leios-volcy** + **leios-silem** (Hybrid-Node image, private topology). |
+| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** | Primary relay. K3s cluster (Discord bots, **leiosT1** relay on :3010). |
+| **main4** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT2** | Secondary Leios relay (:3010) for BP peering redundancy. |
+| **main5** | Relays + AI | Cardano mainnet, Leios (**leiosT3**, pending) | Tertiary Leios relay when host is online. AI sandbox (Ollama). |
 | **main6** | NAS / Storage | — | Backup target. DB snapshots, AI memory, cold key storage (offline). |
 
 ### Network Security
@@ -82,11 +85,12 @@ Hybrid-Node
 │   ├── mainnet (afpm) → BP (main1) + Relays (main3, main4)
 │   └── testnet (afpt) → main2
 │
-├── Leios (Ouroboros Leios — prototype)
-│   └── musashi (leios) → Relays leiosT1 (main3), leiosT2 (main4),
-│                          leiosT3 (main5, pending)
-│                          BPs leios-volcy + leios-silem (main2, sync-only —
-│                          forging pending upstream BLS) — magic 164, IOG prebuilt image
+├── Leios (Ouroboros Leios — Musashi Dojo)
+│   └── musashi (leios, magic 164) → Option B: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+│       Relays: leiosT1 (main3 :3010), leiosT2 (main4 :3010), leiosT3 (main5, pending)
+│       BPs: leios-volcy (main2 :6000), leios-silem (main2 :6001)
+│       Fleet node pin: git 40888f50 (chain-db compatible); HEAD CLI for Dijkstra txs
+│       On-chain: stake + pool registered; forging pending upstream BLS (#776)
 │
 ├── Midnight
 │   └── preview        → main2 (K3s stack)
@@ -120,6 +124,11 @@ Each chain has its own Dockerfile and version pins:
 > branch (the branch's `cabal.project` pins patched `ouroboros-consensus` /
 > `ouroboros-network`), so it does not consume a tagged release or the prebuilt
 > `cardano-cli` used by the other chains.
+>
+> **Fleet pin:** `chains/leios/versions.env` sets `NODE_BUILD_REF=40888f50` so running
+> nodes stay chain-db compatible with the IOG prebuilt binary. Override at build time for
+> newer CLI features (e.g. `make build-leios NODE_BUILD_REF=7c357a55` for Dijkstra cert/tx
+> fixes); use one-shot pods for cert/tx work without upgrading the syncing fleet node.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -233,6 +242,48 @@ testnet for Cardano's next-generation high-throughput consensus (CIP-0164). It u
 the shared `cardano-node` lineage and the same Hybrid-Node entrypoint/Helm/K3s
 platform as Cardano and ApexFusion, but on a **prototype** build with extra layers.
 
+### Fleet topology (deployed)
+
+All live Leios nodes run **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` with
+`NETWORK=leios` and the shared entrypoint. Relays bootstrap from IOG's Musashi peer;
+BPs use a **private topology** (Tailscale only, no public or ledger peers).
+
+```
+Internet / Musashi bootstrap
+         │
+         │  leios-node.play.dev.cardano.org:3001
+         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Relay layer (public :3010, Hybrid-Node image)                  │
+│                                                                 │
+│   main3: leiosT1 (leiost1)          main4: leiosT2 (leiost2)   │
+│   Tailscale 100.103.135.9:3010      Tailscale 100.110.37.42:3010│
+└───────────────┬─────────────────────────────┬───────────────────┘
+                │         Tailscale mesh        │
+                ▼                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  main2 — Block producers (private :6000 / :6001, NO public ports)│
+│                                                                 │
+│   leios-volcy (:6000)              leios-silem (:6001)          │
+│   CUSTOM_PEERS → leiosT1 + leiosT2 only                        │
+│   Keys: /data/leios/<pool>/priv    Wallet: /data/leios/<pool>/wallet│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| Node | Role | Host | Namespace | Port | Image |
+|------|------|------|-----------|------|-------|
+| `leiosT1` | relay | main3 | `leiost1` | 3010 | `hybrid-node:leios-11.0.1` |
+| `leiosT2` | relay | main4 | `leiost2` | 3010 | `hybrid-node:leios-11.0.1` |
+| `leiosT3` | relay | main5 | `leiost3` | 3010 | pending (host offline) |
+| `leios-volcy` | BP | main2 | `leios-volcy` | 6000 | `hybrid-node:leios-11.0.1` |
+| `leios-silem` | BP | main2 | `leios-silem` | 6001 | `hybrid-node:leios-11.0.1` |
+
+K3s manifests: `chains/leios/k3s/leiost1.yaml`, `leiost2.yaml`, `main2/leios-volcy.yaml`,
+`main2/leios-silem.yaml`.
+
+**Option A** (IOG prebuilt `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest`)
+remains documented for quick relay smoke tests but is **not** what the fleet runs.
+
 ### How it differs from Cardano/ApexFusion
 
 | Aspect | Cardano / ApexFusion | Leios (Musashi) |
@@ -269,18 +320,42 @@ The shared [entrypoint](../platform/bin/entrypoint.sh) handles `NETWORK=leios`:
 
 - Downloads configs from cardano-playground `next-2026-05-15` (incl. the 5th era
   `dijkstra-genesis.json` and `peer-snapshot.json` referenced by topology)
-- Maps `--testnet-magic 164` for `cardano-cli` queries
+- **Force-refreshes** `topology.json` on every start — guild-deploy seeds a Cardano
+  *mainnet* topology by default, which is wrong for Musashi Dojo
+- Maps `--testnet-magic 164` / `CARDANO_NODE_NETWORK_ID=164` for CLI queries
 - Skips Mithril (unavailable for Leios)
-- Relay-first; BP forging deferred until BLS key support lands
+- BP mode: loads KES/VRF/op.cert from `kes.skey` + `vrf.skey` + `op.cert` naming
+  (in addition to CoinCashew `node.cert` / `hot.skey` layouts)
+- `CUSTOM_PEERS` on BPs replaces topology with relay-only Tailscale peers
+- BP forging deferred until BLS key support lands upstream
+
+### On-chain operator status (Musashi)
+
+| Step | Status |
+|------|--------|
+| Stake address registration | ✅ both pools (Dijkstra era txs via HEAD CLI) |
+| Pool registration | ✅ both pools (500 ADA deposit each) |
+| Pool params (5k pledge, 3% margin, relays) | queued in `futurePoolParams` until next epoch |
+| Pool delegation (faucet) | ❌ pending — needed to satisfy pledge |
+| BLS in pool cert + node `--shelley-bls-key` | ❌ pending ([ouroboros-leios#776](https://github.com/input-output-hk/ouroboros-leios/issues/776)) |
 
 ### Image build
 
 ```bash
-make build-leios                 # builds from the leios-prototype branch
-# override if upstream moves the branch:
-make build-leios NODE_BUILD_REF=leios-prototype \
-                 NODE_REPO=https://github.com/IntersectMBO/cardano-node.git
+# Default fleet-compatible build (matches IOG prebuilt chain DB):
+make build-leios NODE_BUILD_REF=40888f50725e473d91f40e554e2d436dfc80a924
+
+# HEAD build (Dijkstra cert/tx fixes — for one-shot CLI pods, not fleet node DB):
+make build-leios NODE_BUILD_REF=7c357a5531cc3316e9f708f4465eb66db564d8aa
+
+# Override repo if upstream moves the prototype branch:
+make build-leios \
+  NODE_REPO=https://github.com/IntersectMBO/cardano-node.git \
+  NODE_BUILD_REF=leios-prototype
 ```
+
+`Dockerfile.leios` clones `leios-prototype` (depth 50) then checks out `NODE_BUILD_REF`
+when it differs from the branch name.
 
 ---
 
@@ -290,12 +365,13 @@ make build-leios NODE_BUILD_REF=leios-prototype \
 
 | Service | Port | Protocol | Notes |
 |---------|------|----------|-------|
-| cardano-node (relay) | 3001 | TCP | Public — peers with `leios-node.play.dev.cardano.org:3001` |
-| cardano-node (BP) | 3001 | TCP | Private — relay-only (BP pending BLS support) |
+| cardano-node (relay) | 3010 | TCP | **leiosT1/leiosT2** — public + Musashi bootstrap |
+| cardano-node (BP) | 6000 / 6001 | TCP | **leios-volcy / leios-silem** — private, relay-only via Tailscale |
 | Prometheus metrics | 12798 | HTTP | Internal only |
 | EKG | 12788 | HTTP | Internal only |
-| Leios DB | — | SQLite | `leios.db` (endorser-block tx store) |
+| Leios DB | — | SQLite | `leios.db` inside `db/` (endorser-block tx store) |
 | Node socket | — | Unix | `/opt/cardano/cnode/sockets/node.socket` |
+| Host data (K3s) | — | hostPath | `/data/leios/<node>/` — `data/`, `priv/`, `wallet/` |
 
 ### Cardano / ApexFusion
 

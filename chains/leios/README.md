@@ -96,11 +96,12 @@ There are two image options for a Leios relay:
 | Option | Image | Build | Includes | Use when |
 |--------|-------|-------|----------|----------|
 | **A — Prebuilt (IOG)** | `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest` | none (pull) | node + cli + pinned configs | You just want a synced relay fast |
-| **B — Hybrid-Node** | `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` | `make build-leios` (~1–2h source compile) | + Guild tooling, healthcheck, entrypoint | You want full platform consistency |
+| **B — Hybrid-Node** | `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` ✅ built & pushed | `make build-leios` (~1–2h source compile) | + Guild tooling, healthcheck, entrypoint | You want full platform consistency |
 
-> The deployed **`leiosT1`** relay (main3) currently runs **Option A** — the official
-> IOG prebuilt image. It listens on port **3010**, stores everything under `/data`,
-> and bootstraps from `leios-node.play.dev.cardano.org:3001` out of the box.
+> The **`leiosT1` / `leiosT2`** relays and **`leios-volcy` / `leios-silem`** BPs run
+> **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` with the shared entrypoint.
+> Fleet nodes pin git `40888f50` for chain-db compatibility with the IOG prebuilt binary.
+> One-shot CLI pods can use a HEAD build (`7c357a55`) for Dijkstra cert/tx work.
 
 ### Option A — Prebuilt IOG relay (deployed as `leiosT1`)
 
@@ -149,9 +150,9 @@ leios/
 ├── configs/
 │   └── leios/               # Optional config overrides (dir name == NETWORK)
 └── k3s/
-    ├── leiost1.yaml         # leiosT1 relay (Option A — prebuilt IOG image, main3)
-    ├── leiost2.yaml         # leiosT2 relay (Option A — prebuilt IOG image, main4)
-    ├── leiost3.yaml         # leiosT3 relay (Option A — prebuilt IOG image, main5)
+    ├── leiost1.yaml         # leiosT1 relay (Option B — Hybrid-Node, main3)
+    ├── leiost2.yaml         # leiosT2 relay (Option B — Hybrid-Node, main4)
+    ├── leiost3.yaml         # leiosT3 relay (Option B — Hybrid-Node, main5)
     ├── relay.yaml           # Generic relay (Option B — Hybrid-Node image)
     └── main2/
         ├── leios-volcy.yaml # VOLCY block producer (main2)

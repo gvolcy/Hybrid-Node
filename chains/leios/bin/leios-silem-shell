@@ -1,0 +1,4 @@
+#!/bin/bash
+# Open an interactive shell in the leios-silem BP pod (main2 / K3s).
+export KUBECONFIG="${KUBECONFIG:-/home/mvolcy2/.kube/config}"
+exec kubectl exec -n leios-silem -it deployment/leios-silem -- bash

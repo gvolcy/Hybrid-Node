@@ -1,0 +1,15 @@
+#!/bin/bash
+# Open a wallet shell in the leios-volcy BP pod (main2 / K3s).
+# Starts in /wallet with node socket + magic 164 pre-set for cardano-cli.
+export KUBECONFIG="${KUBECONFIG:-/home/mvolcy2/.kube/config}"
+exec kubectl exec -n leios-volcy -it deployment/leios-volcy -- bash -lc '
+  export CARDANO_NODE_SOCKET_PATH=/opt/cardano/cnode/sockets/node.socket
+  export CARDANO_NODE_NETWORK_ID=164
+  cd /wallet
+  echo "=== leios-volcy wallet ==="
+  echo "payment: $(cat payment.addr 2>/dev/null || echo missing)"
+  echo "stake:   $(cat stake.addr 2>/dev/null || echo missing)"
+  echo "balance: $(cardano-cli query utxo --address "$(cat payment.addr)" --testnet-magic 164 2>/dev/null | awk "END{print NR-1 \" UTxOs\"}")"
+  echo ""
+  exec bash
+'

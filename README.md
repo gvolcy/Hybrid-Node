@@ -23,9 +23,9 @@ entrypoint that handles config precedence, genesis hash verification, P2P peer h
 graceful shutdown, and multi-pool key management out of the box. One image per chain. Any network.
 Deploy in seconds.
 
-> 🟢 **Production-validated** — Running across 17 nodes: Cardano mainnet (VOLCY & SILEM stake
-> pools), ApexFusion Vector (AFPM/AFPT), and Midnight Preview networks. Plus the **Leios /
-> Musashi Dojo** testnet relay (`leiosT1`, main3).
+> 🟢 **Production-validated** — Running across 17+ nodes: Cardano mainnet (VOLCY & SILEM stake
+> pools), ApexFusion Vector (AFPM/AFPT), Midnight Preview, and **Leios / Musashi Dojo**
+> (leiosT1 + leiosT2 relays, leios-volcy + leios-silem BPs on main2/main3/main4).
 
 ---
 
@@ -82,6 +82,19 @@ GUILD_DEPLOY_BRANCH=main
 | Mainnet (Vector) | `afpm` | ✅ Production |
 | Testnet (Vector) | `afpt` | ✅ Production |
 
+### Leios (Musashi Dojo)
+
+| Network | `NETWORK=` | Magic | Status |
+|---------|------------|-------|--------|
+| Musashi Dojo testnet | `leios` | 164 | ✅ Fleet deployed (Option B Hybrid-Node image) |
+
+| Node | Role | Host | Port |
+|------|------|------|------|
+| leiosT1 | relay | main3 | 3010 |
+| leiosT2 | relay | main4 | 3010 |
+| leios-volcy | BP | main2 | 6000 |
+| leios-silem | BP | main2 | 6001 |
+
 ### Midnight
 
 | Network | Image | Status |
@@ -130,21 +143,30 @@ network configurations at build time.
 └───────┬────────┘    └─────────┬───────────┘    │  db-sync + ogmios │
         │                       │                └──────────┬────────┘
         │                       │                           │
+        │              ┌────────┴──────────┐                │
+        │              │  Leios Stack      │                │
+        │              │  (Musashi Dojo)   │                │
+        │              │  magic 164        │                │
+        │              │  leiosT1/T2 relays│                │
+        │              │  leios-volcy/silem│                │
+        │              └─────────┬─────────┘                │
+        │                       │                           │
 ┌───────┴───────────────────────┴───────────────────────────┘
 │
 │  ┌──────────────────────────────────────────────────────────┐
-│  │      Shared Platform Layer (Cardano / ApexFusion)        │
+│  │      Shared Platform Layer (Cardano / ApexFusion / Leios) │
 │  │                                                          │
 │  │  • cardano-node (source-compiled from IntersectMBO)      │
 │  │  • Guild Operators tooling (CNTools, gLiveView)          │
 │  │  • Monitoring (Prometheus, EKG, nview, txtop)            │
-│  │  • Mithril (client + signer)                             │
+│  │  • Mithril (client + signer) — not used on Leios         │
 │  │  • CNCLI (leader logs, validation, PoolTool)             │
-│  │  • Graceful shutdown (280s SIGINT drain)                  │
+│  │  • Graceful shutdown (SIGINT drain)                     │
 │  │  • DB backup / restore                                   │
 │  │  • Multi-pool key management                             │
 │  │                                                          │
 │  │  Docker · Helm · K3s · debian:bookworm-slim              │
+│  │  Leios: Dockerfile.leios · prototype leios-prototype   │
 │  └──────────────────────────────────────────────────────────┘
 │
 │  ┌──────────────────────────────────────────────────────────┐
@@ -175,7 +197,8 @@ Hybrid-Node/
 ├── platform/                       # Shared infrastructure
 │   ├── docker/
 │   │   ├── Dockerfile.cardano      #   Cardano multi-stage build
-│   │   └── Dockerfile.apexfusion   #   ApexFusion multi-stage build
+│   │   ├── Dockerfile.apexfusion   #   ApexFusion multi-stage build
+│   │   └── Dockerfile.leios      #   Leios / Musashi prototype build
 │   └── bin/
 │       ├── entrypoint.sh           #   Unified entrypoint (1000+ lines)
 │       └── healthcheck.sh          #   Container health check

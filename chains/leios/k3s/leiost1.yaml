@@ -1,16 +1,8 @@
 # ============================================================================
-# leiosT1 — Leios / Musashi Dojo relay on K3s (main3)
-# Uses the official IOG prebuilt Leios testnet relay image, which bakes in the
-# pinned cardano-playground configs (incl. dijkstra genesis + peer snapshot)
-# and runs cardano-node as a non-block-producing relay against the public
-# bootstrap peer leios-node.play.dev.cardano.org:3001 (network magic 164).
-#
-#   image: ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest
-#   run-node.sh -> cardano-node run --config config.json --port 3010 \
-#                  --topology topology.json --database-path db \
-#                  --socket-path node.socket   (all under WORKING_DIR=/data)
-#
-# K8s names must be lowercase, so the resources are "leiost1" (= leiosT1).
+# leiosT1 — Leios / Musashi Dojo relay on K3s (main3) — Option B (Hybrid-Node)
+# Image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+# Bootstrap: leios-node.play.dev.cardano.org:3001 (entrypoint topology refresh)
+# Port 3010 preserved for BP peering over Tailscale.
 # Apply:  kubectl apply -f leiost1.yaml
 # ============================================================================
 ---
@@ -43,46 +35,77 @@ spec:
         network: leios
     spec:
       hostname: leiost1
-      terminationGracePeriodSeconds: 120
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: cardano-node
-          image: ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest
+          image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
           imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/entrypoint.sh"]
           env:
-            - name: WORKING_DIR
-              value: "/data"
-            - name: PORT
+            - name: NETWORK
+              value: "leios"
+            - name: NODE_MODE
+              value: "relay"
+            - name: NODE_PORT
               value: "3010"
-            - name: HOST_ADDR
-              value: "0.0.0.0"
+            - name: CNODE_PORT
+              value: "3010"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: UPDATE_CHECK
+              value: "N"
+            - name: CPU_CORES
+              value: "4"
             - name: CARDANO_NODE_NETWORK_ID
               value: "164"
             - name: CARDANO_NODE_SOCKET_PATH
-              value: "/data/node.socket"
+              value: "/opt/cardano/cnode/sockets/node.socket"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
           ports:
             - containerPort: 3010
               hostPort: 3010
               name: p2p
               protocol: TCP
-          # P2P responder port only opens after initial chunk validation /
-          # ledger replay. Leios testnet is small, so this is quick, but keep a
-          # generous startup grace so the pod isn't killed mid-replay.
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    killall -s SIGINT cardano-node 2>/dev/null || true
+                    for i in $(seq 1 280); do
+                      [ -f /opt/cardano/cnode/db/clean ] && exit 0
+                      sleep 1
+                    done
           startupProbe:
             tcpSocket:
               port: p2p
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 15
             failureThreshold: 240
           livenessProbe:
-            tcpSocket:
-              port: p2p
-            initialDelaySeconds: 60
+            exec:
+              command: ["/bin/bash", "/usr/local/bin/healthcheck.sh"]
+            initialDelaySeconds: 120
             periodSeconds: 30
             failureThreshold: 10
           readinessProbe:
-            tcpSocket:
-              port: p2p
-            initialDelaySeconds: 20
+            exec:
+              command: ["/bin/bash", "/usr/local/bin/healthcheck.sh"]
+            initialDelaySeconds: 60
             periodSeconds: 15
             failureThreshold: 10
           resources:
@@ -93,12 +116,36 @@ spec:
               cpu: "4"
               memory: "8Gi"
           volumeMounts:
-            - mountPath: /data
-              name: data
+            - mountPath: /opt/cardano/cnode/db
+              name: db
+            - mountPath: /opt/cardano/cnode/files
+              name: files
+            - mountPath: /opt/cardano/cnode/sockets
+              name: sockets
+            - mountPath: /opt/cardano/cnode/logs
+              name: logs
+            - mountPath: /opt/cardano/cnode/guild-db
+              name: guild-db
       volumes:
-        - name: data
+        - name: db
           hostPath:
-            path: /data/leios/leiost1
+            path: /data/leios/leiost1/db
+            type: DirectoryOrCreate
+        - name: files
+          hostPath:
+            path: /data/leios/leiost1/files
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: /data/leios/leiost1/sockets
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /data/leios/leiost1/logs
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: /data/leios/leiost1/guild-db
             type: DirectoryOrCreate
 ---
 apiVersion: v1
