@@ -19,7 +19,7 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 │  │ BP (afpm)   │  │ Relay       │  │ Relay       │  │ Ollama      │  │
 │  │             │  │ Leios       │  │ Leios       │  │ Leios       │  │
 │  │ VOLCY Pool  │  │ leiosT1     │  │ leiosT2     │  │ leiosT3     │  │
-│  │ SILEM Pool  │  │ Discord     │  │             │  │ (pending)   │  │
+│  │ SILEM Pool  │  │ Discord     │  │             │  │ leiosT3     │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │
 │         │                │                │                │          │
 │         └────────────────┴────────────────┴────────────────┘          │
@@ -47,9 +47,9 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 |------|------|----------|-------|
 | **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
 | **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, **Leios BPs** | Non-production workloads. **leios-volcy** + **leios-silem** (Hybrid-Node image, private topology). |
-| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** | Primary relay. K3s cluster (Discord bots, **leiosT1** relay on :3010). |
+| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** (nominal) | Primary relay. K3s cluster (Discord bots). leiosT1 interim on main2 while offline. |
 | **main4** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT2** | Secondary Leios relay (:3010) for BP peering redundancy. |
-| **main5** | Relays + AI | Cardano mainnet, Leios (**leiosT3**, pending) | Tertiary Leios relay when host is online. AI sandbox (Ollama). |
+| **main5** | Relays + AI | Cardano mainnet, Leios (**leiosT3**) | Tertiary Leios relay (:3010). AI sandbox (Ollama). |
 | **main6** | NAS / Storage | — | Backup target. DB snapshots, AI memory, cold key storage (offline). |
 
 ### Network Security
@@ -87,7 +87,7 @@ Hybrid-Node
 │
 ├── Leios (Ouroboros Leios — Musashi Dojo)
 │   └── musashi (leios, magic 164) → Option B: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
-│       Relays: leiosT1 (main3 :3010), leiosT2 (main4 :3010), leiosT3 (main5, pending)
+│       Relays: leiosT1 (main2 interim / main3 :3010), leiosT2 (main4 :3010), leiosT3 (main5 :3010)
 │       BPs: leios-volcy (main2 :6000), leios-silem (main2 :6001)
 │       Fleet node pin: git 40888f50 (chain-db compatible); HEAD CLI for Dijkstra txs
 │       On-chain: stake + pool registered; forging pending upstream BLS (#776)
@@ -256,30 +256,31 @@ Internet / Musashi bootstrap
 ┌─────────────────────────────────────────────────────────────────┐
 │  Relay layer (public :3010, Hybrid-Node image)                  │
 │                                                                 │
-│   main3: leiosT1 (leiost1)          main4: leiosT2 (leiost2)   │
-│   Tailscale 100.103.135.9:3010      Tailscale 100.110.37.42:3010│
-└───────────────┬─────────────────────────────┬───────────────────┘
-                │         Tailscale mesh        │
-                ▼                               ▼
+│   main2*: leiosT1 (leiost1)         main4: leiosT2 (leiost2)     main5: leiosT3 (leiost3)   │
+│   Tailscale 100.125.84.24:3010      Tailscale 100.110.37.42:3010  Tailscale 100.125.176.60:3010│
+│   (* interim while main3 offline)                                                             │
+└───────────────┬─────────────────────────────┬─────────────────────────┬─────────────────────┘
+                │         Tailscale mesh        │                         │
+                ▼                               ▼                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  main2 — Block producers (private :6000 / :6001, NO public ports)│
 │                                                                 │
 │   leios-volcy (:6000)              leios-silem (:6001)          │
-│   CUSTOM_PEERS → leiosT1 + leiosT2 only                        │
+│   CUSTOM_PEERS → leiosT1 + leiosT2 + leiosT3 (:3010)           │
 │   Keys: /data/leios/<pool>/priv    Wallet: /data/leios/<pool>/wallet│
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 | Node | Role | Host | Namespace | Port | Image |
 |------|------|------|-----------|------|-------|
-| `leiosT1` | relay | main3 | `leiost1` | 3010 | `hybrid-node:leios-11.0.1` |
+| `leiosT1` | relay | main2 (interim) / main3 | `leiost1` | 3010 | `hybrid-node:leios-11.0.1` |
 | `leiosT2` | relay | main4 | `leiost2` | 3010 | `hybrid-node:leios-11.0.1` |
-| `leiosT3` | relay | main5 | `leiost3` | 3010 | pending (host offline) |
+| `leiosT3` | relay | main5 | `leiost3` | 3010 | `hybrid-node:leios-11.0.1` |
 | `leios-volcy` | BP | main2 | `leios-volcy` | 6000 | `hybrid-node:leios-11.0.1` |
 | `leios-silem` | BP | main2 | `leios-silem` | 6001 | `hybrid-node:leios-11.0.1` |
 
-K3s manifests: `chains/leios/k3s/leiost1.yaml`, `leiost2.yaml`, `main2/leios-volcy.yaml`,
-`main2/leios-silem.yaml`.
+K3s manifests: `chains/leios/k3s/leiost1.yaml`, `leiost2.yaml`, `leiost3.yaml`,
+`main2/leios-volcy.yaml`, `main2/leios-silem.yaml`.
 
 **Option A** (IOG prebuilt `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest`)
 remains documented for quick relay smoke tests but is **not** what the fleet runs.
@@ -326,8 +327,10 @@ The shared [entrypoint](../platform/bin/entrypoint.sh) handles `NETWORK=leios`:
 - Skips Mithril (unavailable for Leios)
 - BP mode: loads KES/VRF/op.cert from `kes.skey` + `vrf.skey` + `op.cert` naming
   (in addition to CoinCashew `node.cert` / `hot.skey` layouts)
-- `CUSTOM_PEERS` on BPs replaces topology with relay-only Tailscale peers
+- `CUSTOM_PEERS` on BPs replaces topology with relay-only Tailscale peers (all three relays)
 - BP forging deferred until BLS key support lands upstream
+- Partial chain DB replay can stall sync or crash with LeiosCert (Issue #890); fix: wipe
+  `data/db` and resync — do not restart BPs mid-sync unless prepared to reset DB
 
 ### On-chain operator status (Musashi)
 
@@ -335,8 +338,8 @@ The shared [entrypoint](../platform/bin/entrypoint.sh) handles `NETWORK=leios`:
 |------|--------|
 | Stake address registration | ✅ both pools (Dijkstra era txs via HEAD CLI) |
 | Pool registration | ✅ both pools (500 ADA deposit each) |
-| Pool params (5k pledge, 3% margin, relays) | queued in `futurePoolParams` until next epoch |
-| Pool delegation (faucet) | ❌ pending — needed to satisfy pledge |
+| Pool params (5k pledge, 3% margin, 3 relays) | ✅ both pools (on-chain; leiosT1/T2/T3) |
+| Pool delegation (faucet) | ❌ pending — Musashi faucet rate limits; needed for pledge |
 | BLS in pool cert + node `--shelley-bls-key` | ❌ pending ([ouroboros-leios#776](https://github.com/input-output-hk/ouroboros-leios/issues/776)) |
 
 ### Image build

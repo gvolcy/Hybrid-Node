@@ -1,7 +1,8 @@
 # ============================================================================
-# leiosT1 — Leios / Musashi Dojo relay on K3s (main3) — Option B (Hybrid-Node)
+# leiosT1 — Leios / Musashi Dojo relay on K3s — Option B (Hybrid-Node)
 # Image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
-# Bootstrap: leios-node.play.dev.cardano.org:3001 (entrypoint topology refresh)
+# Nominal host: main3 (Tailscale 100.103.135.9). Interim on main2 (100.125.84.24)
+# while main3 is offline. Bootstrap: leios-node.play.dev.cardano.org:3001
 # Port 3010 preserved for BP peering over Tailscale.
 # Apply:  kubectl apply -f leiost1.yaml
 # ============================================================================

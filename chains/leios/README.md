@@ -98,7 +98,7 @@ There are two image options for a Leios relay:
 | **A — Prebuilt (IOG)** | `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest` | none (pull) | node + cli + pinned configs | You just want a synced relay fast |
 | **B — Hybrid-Node** | `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` ✅ built & pushed | `make build-leios` (~1–2h source compile) | + Guild tooling, healthcheck, entrypoint | You want full platform consistency |
 
-> The **`leiosT1` / `leiosT2`** relays and **`leios-volcy` / `leios-silem`** BPs run
+> The **`leiosT1` / `leiosT2` / `leiosT3`** relays and **`leios-volcy` / `leios-silem`** BPs run
 > **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` with the shared entrypoint.
 > Fleet nodes pin git `40888f50` for chain-db compatibility with the IOG prebuilt binary.
 > One-shot CLI pods can use a HEAD build (`7c357a55`) for Dijkstra cert/tx work.
@@ -150,7 +150,7 @@ leios/
 ├── configs/
 │   └── leios/               # Optional config overrides (dir name == NETWORK)
 └── k3s/
-    ├── leiost1.yaml         # leiosT1 relay (Option B — Hybrid-Node, main3)
+    ├── leiost1.yaml         # leiosT1 relay (Option B — main2 interim / main3)
     ├── leiost2.yaml         # leiosT2 relay (Option B — Hybrid-Node, main4)
     ├── leiost3.yaml         # leiosT3 relay (Option B — Hybrid-Node, main5)
     ├── relay.yaml           # Generic relay (Option B — Hybrid-Node image)
@@ -161,16 +161,19 @@ leios/
 
 ### Fleet
 
-| Node | Role | Host | Port | Status |
-|------|------|------|------|--------|
-| `leiosT1` | relay | main3 | 3010 | deployed |
-| `leiosT2` | relay | main4 | 3010 | deployed |
-| `leiosT3` | relay | main5 | 3010 | pending (host offline) |
-| `leios-volcy` | block producer | main2 | 6000 | deployed (sync-only; forging pending BLS) |
-| `leios-silem` | block producer | main2 | 6001 | deployed (sync-only; forging pending BLS) |
+| Node | Role | Host | Port | Tailscale | Status |
+|------|------|------|------|-----------|--------|
+| `leiosT1` | relay | main2 (interim) / main3 | 3010 | `100.125.84.24` / `100.103.135.9` | deployed |
+| `leiosT2` | relay | main4 | 3010 | `100.110.37.42` | deployed |
+| `leiosT3` | relay | main5 | 3010 | `100.125.176.60` | deployed |
+| `leios-volcy` | block producer | main2 | 6000 | — | deployed (sync-only; forging pending BLS) |
+| `leios-silem` | block producer | main2 | 6001 | — | deployed (sync-only; forging pending BLS) |
 
-The two BPs run privately — their topology peers **only** with `leiosT1`/`leiosT2`
-(over Tailscale), no public or ledger peers.
+The two BPs run privately — their topology peers **only** with all three relays
+(over Tailscale via `CUSTOM_PEERS`), no public or ledger peers.
+
+**On-chain:** both pools registered (5k pledge, 3% margin, 170 ADA cost) with three
+relays in the pool cert. Faucet delegation still pending.
 
 ---
 
@@ -191,7 +194,11 @@ The two BPs run privately — their topology peers **only** with `leiosT1`/`leio
 Two BPs (`leios-volcy`, `leios-silem`) are deployed on main2 via
 [`k3s/main2/`](k3s/main2/). They run the prototype `cardano-node` with the
 standard **KES + VRF + op.cert** credentials and a private topology (peering
-only with `leiosT1`/`leiosT2`), so they **sync** and are BP-ready.
+only with `leiosT1`/`leiosT2`/`leiosT3`), so they **sync** and are BP-ready.
+
+If sync stalls at a fixed block height or crashes with LeiosCert (Issue #890), scale
+the deployment to 0, move `data/db` aside, create a fresh empty `db/`, and scale
+back to 1. Keys and wallets on the host are not affected.
 
 **They do not forge yet.** Verified against the prototype binaries:
 

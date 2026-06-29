@@ -1,7 +1,7 @@
 # ============================================================================
 # leios-volcy — Leios / Musashi Dojo Block Producer on K3s (main2)
 # Option B (Hybrid-Node): ghcr.io/gvolcy/hybrid-node:leios-11.0.1
-# Private topology via CUSTOM_PEERS -> leiosT1/leiosT2 (Tailscale :3010).
+# Private topology via CUSTOM_PEERS -> leiosT1/leiosT2/leiosT3 (Tailscale :3010).
 # Keys: /data/leios/leios-volcy/priv  |  Wallet: /data/leios/leios-volcy/wallet
 # Apply: kubectl apply -f leios-volcy.yaml
 # ============================================================================
@@ -60,7 +60,7 @@ spec:
             - name: POOL_DIR
               value: "/opt/cardano/cnode/priv/pool"
             - name: CUSTOM_PEERS
-              value: "100.103.135.9:3010,100.110.37.42:3010"
+              value: "100.125.84.24:3010,100.110.37.42:3010,100.125.176.60:3010"
             - name: MITHRIL_DOWNLOAD
               value: "N"
             - name: UPDATE_CHECK
