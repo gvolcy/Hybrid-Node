@@ -319,8 +319,8 @@ remains documented for quick relay smoke tests but is **not** what the fleet run
 
 The shared [entrypoint](../platform/bin/entrypoint.sh) handles `NETWORK=leios`:
 
-- Downloads configs from cardano-playground `next-2026-05-15` (incl. the 5th era
-  `dijkstra-genesis.json` and `peer-snapshot.json` referenced by topology)
+- Downloads configs from the [Cardano Operations Book](https://book.play.dev.cardano.org/adv-musashi.html)
+  `environments-pre/leios` (incl. the 5th era `dijkstra-genesis.json` and `peer-snapshot.json`)
 - **Force-refreshes** `topology.json` on every start — guild-deploy seeds a Cardano
   *mainnet* topology by default, which is wrong for Musashi Dojo
 - Maps `--testnet-magic 164` / `CARDANO_NODE_NETWORK_ID=164` for CLI queries

@@ -645,7 +645,7 @@ setup_network_configs() {
         afpt)    BASE_URL="https://raw.githubusercontent.com/Scitz0/guild-operators-apex/main/files/configs/afpt"
                  IS_APEX=true
                  log "ApexFusion Prime Testnet (Vector chain)" ;;
-        leios)   BASE_URL="https://raw.githubusercontent.com/input-output-hk/cardano-playground/refs/heads/next-2026-05-15/docs/environments-pre/leios"
+        leios)   BASE_URL="https://book.play.dev.cardano.org/environments-pre/leios"
                  log "Ouroboros Leios — Musashi Dojo testnet (magic 164)" ;;
         *)       err "Unknown network: ${NETWORK}. Supported: mainnet, preview, preprod, guild, afpm, afpt, leios"; exit 1 ;;
     esac

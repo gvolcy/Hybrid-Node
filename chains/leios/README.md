@@ -16,7 +16,7 @@ This directory contains Ouroboros Leios (Musashi Dojo testnet) configuration and
 
 - Bootstrap peer: `leios-node.play.dev.cardano.org:3001`
 - CLI flag: `--testnet-magic 164` (`CARDANO_NODE_NETWORK_ID=164`)
-- Configs: [cardano-playground `next-2026-05-15`](https://github.com/input-output-hk/cardano-playground/tree/next-2026-05-15/docs/environments-pre/leios)
+- Configs: [Cardano Operations Book — Musashi](https://book.play.dev.cardano.org/adv-musashi.html) (`environments-pre/leios`, magic 164)
 
 ---
 
@@ -229,4 +229,4 @@ and [cardano-cli#1355](https://github.com/IntersectMBO/cardano-cli/pull/1355).
 | Leios overview | [leios.cardano-scaling.org](https://leios.cardano-scaling.org/) |
 | Leios repo | [input-output-hk/ouroboros-leios](https://github.com/input-output-hk/ouroboros-leios) |
 | CIP-0164 | [Ouroboros Linear Leios](https://github.com/cardano-foundation/CIPs/pull/1078) |
-| Configs | [cardano-playground (leios)](https://github.com/input-output-hk/cardano-playground/tree/next-2026-05-15/docs/environments-pre/leios) |
+| Configs | [Cardano Operations Book (Musashi)](https://book.play.dev.cardano.org/adv-musashi.html) |

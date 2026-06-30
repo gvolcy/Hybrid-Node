@@ -158,10 +158,10 @@ RUN SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y \
     mv /root/.local/bin /home/guild/.local/ 2>/dev/null || true && \
     chown -R guild:guild /home/guild/
 
-# Bake Leios (Musashi) configs from cardano-playground pre-environments.
-# Includes the 5th genesis era (dijkstra) and the peer snapshot referenced by
-# topology.json. Runtime entrypoint refreshes these unless overridden.
-ARG CONFIG_BASE=https://raw.githubusercontent.com/input-output-hk/cardano-playground/refs/heads/next-2026-05-15/docs/environments-pre/leios
+# Bake Leios (Musashi) configs from the Cardano Operations Book (same content as
+# cardano-playground environments-pre/leios). Includes the 5th genesis era
+# (dijkstra) and the peer snapshot referenced by topology.json.
+ARG CONFIG_BASE=https://book.play.dev.cardano.org/environments-pre/leios
 RUN mkdir -pv ${CNODE_HOME}/files/leios && \
     for file in config.json topology.json peer-snapshot.json \
                 byron-genesis.json shelley-genesis.json alonzo-genesis.json \
