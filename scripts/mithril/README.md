@@ -39,4 +39,4 @@ DMQ node v0.4.2.0 setup and autostart script.
 | Component       | Version  | Tag/Commit |
 |----------------|----------|------------|
 | Mithril Signer | 2617.0   | 2478748    |
-| DMQ Node       | 0.4.2.0  | latest     |
+| DMQ Node       | 0.6.0.0  | 12a8428    |

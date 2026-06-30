@@ -19,7 +19,7 @@ DMQ_TOPOLOGY="$DMQ_DIR/dmq.topology.json"
 DMQ_IPC_DIR="$DMQ_DIR/ipc"
 DMQ_LOG="$DMQ_DIR/dmq.log"
 DMQ_PID_FILE="$DMQ_DIR/dmq-node.pid"
-DMQ_VERSION="0.4.2.0"
+DMQ_VERSION="0.6.0.0"
 DMQ_DOWNLOAD_URL="https://github.com/IntersectMBO/dmq-node/releases/download/${DMQ_VERSION}/dmq-node-linux.tar.gz"
 CARDANO_SOCKET="/opt/cardano/cnode/sockets/node.socket"
 
@@ -66,7 +66,7 @@ else
     log "DMQ binary already exists"
 fi
 
-# Write DMQ configuration (trace-dispatcher format for v0.4.x)
+# Write DMQ configuration (trace-dispatcher format)
 cat > "$DMQ_CONFIG" << 'DMQCFG'
 {
   "PeerSharing": true,
