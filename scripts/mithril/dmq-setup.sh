@@ -23,6 +23,10 @@ DMQ_VERSION="0.6.0.0"
 DMQ_DOWNLOAD_URL="https://github.com/IntersectMBO/dmq-node/releases/download/${DMQ_VERSION}/dmq-node-linux.tar.gz"
 CARDANO_SOCKET="/opt/cardano/cnode/sockets/node.socket"
 
+# Shelley genesis is required since dmq-node 0.6.0.0 (reads system start / slot
+# parameters). Point at the node's Shelley genesis for the target network.
+SHELLEY_GENESIS_FILE="/opt/cardano/cnode/files/shelley-genesis.json"
+
 # Network magic — adjust per network
 CARDANO_NETWORK_MAGIC=2              # Preview=2, Preprod=1, Mainnet=764824073
 DMQ_NETWORK_MAGIC=2147483650         # Preview DMQ magic
@@ -67,10 +71,11 @@ else
 fi
 
 # Write DMQ configuration (trace-dispatcher format)
-cat > "$DMQ_CONFIG" << 'DMQCFG'
+cat > "$DMQ_CONFIG" << DMQCFG
 {
   "PeerSharing": true,
   "LedgerPeers": false,
+  "ShelleyGenesisFile": "${SHELLEY_GENESIS_FILE}",
   "TraceOptions": {
     "": {
       "severity": "Notice",
