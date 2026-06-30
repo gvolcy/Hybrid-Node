@@ -1,0 +1,574 @@
+# ============================================================================
+# Hybrid-Node ApexFusion Prime Testnet (AFPT) Block Producers — main2
+# ============================================================================
+# Migrates apex-test1..4 OFF the Guild operator stack (cnode.sh) and ONTO the
+# Hybrid-Node entrypoint, reusing the existing PVCs (DB + pool keys) so there is
+# NO resync and NO key re-import.
+#
+#   Pool mapping (namespace / POOL_NAME / node port):
+#     apex-test1 / volcy  / 8781
+#     apex-test2 / volcy2 / 8788
+#     apex-test3 / volcy3 / 8790
+#     apex-test4 / SILEM  / 8890
+#
+# Each BP only talks to the three AFPT relays via CUSTOM_PEERS (DNS):
+#     apexfusion1.volcyada.com:3535  (apexT1)
+#     apexfusion2.volcyada.com:3434  (apexT2)
+#     apexfusion3.volcyada.com:3737  (apexT3)
+#
+# The entrypoint:
+#   - reuses the synced DB on apex-testN-data
+#   - loads Guild-named keys (hot.skey/vrf.skey/op.cert) from priv/pool/<POOL_NAME>
+#   - switches BP config to PraosMode (fixes permanent "still starting")
+#   - rebuilds a locked-down relay-only topology from CUSTOM_PEERS
+#   - binds Prometheus on 12798 and runs CNCLI sync/leaderlog/validate
+#
+# The initContainer seeds /opt/cardano/cnode/files (a NEW writable PVC subPath)
+# from the existing apex-testN-genesis ConfigMap on first start, so the exact
+# AFPT genesis the DB was built with is preserved AND the entrypoint can write
+# its config customisations (the old read-only ConfigMap mount caused the
+# "config.json: Device or resource busy" failures).
+#
+# Apply one at a time (canary), verifying each before the next:
+#   kubectl apply -f bp-afpt.yaml   # applies all four
+# ============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-test1
+  namespace: apex-test1
+  labels:
+    app: apex-test1
+    stack: hybrid-node
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: apex-test1
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: apex-test1
+        stack: hybrid-node
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 600
+      initContainers:
+        - name: seed-configs
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /files
+              if [ ! -f /files/config.json ]; then
+                cp /seed/* /files/ 2>/dev/null || true
+                echo "seeded afpt configs into PVC files dir"
+              else
+                echo "configs already present, leaving as-is"
+              fi
+          volumeMounts:
+            - name: genesis-files
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /files
+              subPath: files
+      containers:
+        - name: cardano-node
+          image: ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "afpt"
+            - name: NODE_MODE
+              value: "bp"
+            - name: NODE_PORT
+              value: "8781"
+            - name: CNODE_PORT
+              value: "8781"
+            - name: CPU_CORES
+              value: "3"
+            - name: CNCLI_ENABLED
+              value: "Y"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: MITHRIL_SIGNER
+              value: "N"
+            - name: CUSTOM_PEERS
+              value: "apexfusion1.volcyada.com:3535,apexfusion2.volcyada.com:3434,apexfusion3.volcyada.com:3737"
+            - name: POOL_NAME
+              value: "volcy"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+          ports:
+            - containerPort: 8781
+              hostPort: 8781
+              name: node
+              protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "3"
+              memory: 16Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/cardano/cnode/db
+              subPath: db
+            - name: data
+              mountPath: /opt/cardano/cnode/logs
+              subPath: logs
+            - name: data
+              mountPath: /opt/cardano/cnode/sockets
+              subPath: sockets
+            - name: data
+              mountPath: /opt/cardano/cnode/guild-db
+              subPath: guild-db
+            - name: data
+              mountPath: /opt/cardano/cnode/priv
+              subPath: priv
+            - name: data
+              mountPath: /opt/cardano/cnode/files
+              subPath: files
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: apex-test1-data
+        - name: genesis-files
+          configMap:
+            name: apex-test1-genesis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-test2
+  namespace: apex-test2
+  labels:
+    app: apex-test2
+    stack: hybrid-node
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: apex-test2
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: apex-test2
+        stack: hybrid-node
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 600
+      initContainers:
+        - name: seed-configs
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /files
+              if [ ! -f /files/config.json ]; then
+                cp /seed/* /files/ 2>/dev/null || true
+                echo "seeded afpt configs into PVC files dir"
+              else
+                echo "configs already present, leaving as-is"
+              fi
+          volumeMounts:
+            - name: genesis-files
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /files
+              subPath: files
+      containers:
+        - name: cardano-node
+          image: ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "afpt"
+            - name: NODE_MODE
+              value: "bp"
+            - name: NODE_PORT
+              value: "8788"
+            - name: CNODE_PORT
+              value: "8788"
+            - name: CPU_CORES
+              value: "3"
+            - name: CNCLI_ENABLED
+              value: "Y"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: MITHRIL_SIGNER
+              value: "N"
+            - name: CUSTOM_PEERS
+              value: "apexfusion1.volcyada.com:3535,apexfusion2.volcyada.com:3434,apexfusion3.volcyada.com:3737"
+            - name: POOL_NAME
+              value: "volcy2"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+          ports:
+            - containerPort: 8788
+              hostPort: 8788
+              name: node
+              protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "3"
+              memory: 16Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/cardano/cnode/db
+              subPath: db
+            - name: data
+              mountPath: /opt/cardano/cnode/logs
+              subPath: logs
+            - name: data
+              mountPath: /opt/cardano/cnode/sockets
+              subPath: sockets
+            - name: data
+              mountPath: /opt/cardano/cnode/guild-db
+              subPath: guild-db
+            - name: data
+              mountPath: /opt/cardano/cnode/priv
+              subPath: priv
+            - name: data
+              mountPath: /opt/cardano/cnode/files
+              subPath: files
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: apex-test2-data
+        - name: genesis-files
+          configMap:
+            name: apex-test2-genesis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-test3
+  namespace: apex-test3
+  labels:
+    app: apex-test3
+    stack: hybrid-node
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: apex-test3
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: apex-test3
+        stack: hybrid-node
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 600
+      initContainers:
+        - name: seed-configs
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /files
+              if [ ! -f /files/config.json ]; then
+                cp /seed/* /files/ 2>/dev/null || true
+                echo "seeded afpt configs into PVC files dir"
+              else
+                echo "configs already present, leaving as-is"
+              fi
+          volumeMounts:
+            - name: genesis-files
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /files
+              subPath: files
+      containers:
+        - name: cardano-node
+          image: ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "afpt"
+            - name: NODE_MODE
+              value: "bp"
+            - name: NODE_PORT
+              value: "8790"
+            - name: CNODE_PORT
+              value: "8790"
+            - name: CPU_CORES
+              value: "3"
+            - name: CNCLI_ENABLED
+              value: "Y"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: MITHRIL_SIGNER
+              value: "N"
+            - name: CUSTOM_PEERS
+              value: "apexfusion1.volcyada.com:3535,apexfusion2.volcyada.com:3434,apexfusion3.volcyada.com:3737"
+            - name: POOL_NAME
+              value: "volcy3"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+          ports:
+            - containerPort: 8790
+              hostPort: 8790
+              name: node
+              protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "3"
+              memory: 16Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/cardano/cnode/db
+              subPath: db
+            - name: data
+              mountPath: /opt/cardano/cnode/logs
+              subPath: logs
+            - name: data
+              mountPath: /opt/cardano/cnode/sockets
+              subPath: sockets
+            - name: data
+              mountPath: /opt/cardano/cnode/guild-db
+              subPath: guild-db
+            - name: data
+              mountPath: /opt/cardano/cnode/priv
+              subPath: priv
+            - name: data
+              mountPath: /opt/cardano/cnode/files
+              subPath: files
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: apex-test3-data
+        - name: genesis-files
+          configMap:
+            name: apex-test3-genesis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apex-test4
+  namespace: apex-test4
+  labels:
+    app: apex-test4
+    stack: hybrid-node
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: apex-test4
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: apex-test4
+        stack: hybrid-node
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 600
+      initContainers:
+        - name: seed-configs
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /files
+              if [ ! -f /files/config.json ]; then
+                cp /seed/* /files/ 2>/dev/null || true
+                echo "seeded afpt configs into PVC files dir"
+              else
+                echo "configs already present, leaving as-is"
+              fi
+          volumeMounts:
+            - name: genesis-files
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /files
+              subPath: files
+      containers:
+        - name: cardano-node
+          image: ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NETWORK
+              value: "afpt"
+            - name: NODE_MODE
+              value: "bp"
+            - name: NODE_PORT
+              value: "8890"
+            - name: CNODE_PORT
+              value: "8890"
+            - name: CPU_CORES
+              value: "3"
+            - name: CNCLI_ENABLED
+              value: "Y"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: MITHRIL_SIGNER
+              value: "N"
+            - name: CUSTOM_PEERS
+              value: "apexfusion1.volcyada.com:3535,apexfusion2.volcyada.com:3434,apexfusion3.volcyada.com:3737"
+            - name: POOL_NAME
+              value: "SILEM"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: "12798"
+            - name: EKG_HOST
+              value: "0.0.0.0"
+          ports:
+            - containerPort: 8890
+              hostPort: 8890
+              name: node
+              protocol: TCP
+            - containerPort: 12798
+              name: prometheus
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command: ["test", "-S", "/opt/cardano/cnode/sockets/node.socket"]
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "3"
+              memory: 16Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/cardano/cnode/db
+              subPath: db
+            - name: data
+              mountPath: /opt/cardano/cnode/logs
+              subPath: logs
+            - name: data
+              mountPath: /opt/cardano/cnode/sockets
+              subPath: sockets
+            - name: data
+              mountPath: /opt/cardano/cnode/guild-db
+              subPath: guild-db
+            - name: data
+              mountPath: /opt/cardano/cnode/priv
+              subPath: priv
+            - name: data
+              mountPath: /opt/cardano/cnode/files
+              subPath: files
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: apex-test4-data
+        - name: genesis-files
+          configMap:
+            name: apex-test4-genesis
