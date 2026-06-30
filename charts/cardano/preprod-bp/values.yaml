@@ -1,0 +1,62 @@
+# Default values for preprod-bp
+# NOTE: This chart is sanitized for the repo. Host-specific paths and DNS have
+# been replaced with placeholders (/data/cardano/..., *.example.com). Override
+# them per pool via values-<pool>.yaml before deploying.
+replicaCount: 1
+
+image:
+  repository: cardanocommunity/cardano-node
+  tag: "10.5.3"
+  pullPolicy: IfNotPresent
+
+namespace: preprod-bp
+
+bp:
+  name: preprod-bp
+  port: 8783
+  metricsPort: 12788
+  pool: volcy
+
+network: preprod
+
+resources:
+  requests:
+    cpu: "1"
+    memory: "3Gi"
+  limits:
+    cpu: "4"
+    memory: "8Gi"
+
+# Features
+features:
+  cpuCores: "4"
+  mithrilSigner: true
+  cncli: true
+
+# Probes configuration
+probes:
+  liveness:
+    initialDelaySeconds: 300
+    periodSeconds: 30
+    failureThreshold: 5
+  readiness:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    failureThreshold: 3
+
+storage:
+  dbPath: ""
+  privPath: ""
+  mithrilPath: ""
+  scriptsPath: ""
+  logsPath: ""
+  socketsPath: ""
+  guildDbPath: ""
+  filesPath: ""
+
+nodeSelector: {}
+
+tolerations:
+  - key: "node.kubernetes.io/disk-pressure"
+    operator: "Exists"
+    effect: "NoSchedule"

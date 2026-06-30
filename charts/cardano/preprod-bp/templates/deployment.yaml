@@ -1,0 +1,147 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.bp.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: {{ .Values.bp.name }}
+    network: {{ .Values.network }}
+    pool: {{ .Values.bp.pool }}
+    app.kubernetes.io/name: {{ .Values.bp.name }}
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ .Values.bp.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.bp.name }}
+        network: {{ .Values.network }}
+        pool: {{ .Values.bp.pool }}
+    spec:
+      hostname: {{ .Values.bp.name }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: cardano-node
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/entrypoint.sh"]
+          env:
+            - name: NETWORK
+              value: {{ .Values.network }}
+            - name: CPU_CORES
+              value: {{ .Values.features.cpuCores | default "4" | quote }}
+            - name: UPDATE_CHECK
+              value: "N"
+            - name: CNODE_PORT
+              value: {{ .Values.bp.port | quote }}
+            - name: POOL_NAME
+              value: {{ .Values.bp.pool }}
+            - name: POOL_DIR
+              value: /opt/cardano/cnode/priv/pool/{{ .Values.bp.pool }}
+            - name: CARDANO_BLOCK_PRODUCER
+              value: "true"
+            - name: MITHRIL_SIGNER_ENABLED
+              value: {{ .Values.features.mithrilSigner | default false | ternary "Y" "N" | quote }}
+            - name: CNCLI_ENABLED
+              value: {{ .Values.features.cncli | default true | ternary "Y" "N" | quote }}
+            - name: EKG_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_HOST
+              value: "0.0.0.0"
+            - name: PROMETHEUS_PORT
+              value: {{ .Values.bp.metricsPort | quote }}
+          ports:
+            - name: cardano
+              containerPort: {{ .Values.bp.port }}
+              hostPort: {{ .Values.bp.port }}
+              protocol: TCP
+            - name: prometheus
+              containerPort: {{ .Values.bp.metricsPort }}
+              protocol: TCP
+            - name: ekg
+              containerPort: {{ .Values.bp.ekgPort | default 12788 }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: db
+              mountPath: /opt/cardano/cnode/db
+            - name: priv
+              mountPath: /opt/cardano/cnode/priv
+            - name: mithril
+              mountPath: /opt/cardano/cnode/mithril
+            - name: scripts
+              mountPath: /opt/cardano/cnode/scripts
+            - name: logs
+              mountPath: /opt/cardano/cnode/logs
+            - name: sockets
+              mountPath: /opt/cardano/cnode/sockets
+            - name: guild-db
+              mountPath: /opt/cardano/cnode/guild-db
+            - name: files
+              mountPath: /opt/cardano/cnode/files
+            - name: entrypoint
+              mountPath: /entrypoint.sh
+              readOnly: true
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.bp.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds | default 300 }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds | default 30 }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold | default 5 }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.bp.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds | default 60 }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds | default 10 }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold | default 3 }}
+      volumes:
+        - name: db
+          hostPath:
+            path: {{ .Values.storage.dbPath }}
+            type: DirectoryOrCreate
+        - name: priv
+          hostPath:
+            path: {{ .Values.storage.privPath }}
+            type: Directory
+        - name: mithril
+          hostPath:
+            path: {{ .Values.storage.mithrilPath }}
+            type: DirectoryOrCreate
+        - name: scripts
+          hostPath:
+            path: {{ .Values.storage.scriptsPath }}
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: {{ .Values.storage.logsPath }}
+            type: DirectoryOrCreate
+        - name: sockets
+          hostPath:
+            path: {{ .Values.storage.socketsPath }}
+            type: DirectoryOrCreate
+        - name: guild-db
+          hostPath:
+            path: {{ .Values.storage.guildDbPath }}
+            type: DirectoryOrCreate
+        - name: files
+          hostPath:
+            path: {{ .Values.storage.filesPath }}
+            type: Directory
+        - name: entrypoint
+          hostPath:
+            path: {{ .Values.storage.entrypointPath }}
+            type: File

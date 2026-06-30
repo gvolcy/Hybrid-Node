@@ -1,0 +1,65 @@
+# Preprod BP - SILEM pool
+namespace: preprod-bp
+network: preprod
+replicaCount: 1
+
+bp:
+  name: preprod-silem
+  port: 8771
+  metricsPort: 12789
+  ekgPort: 12899
+  pool: SILEM
+
+image:
+  repository: cardanocommunity/cardano-node
+  tag: "10.5.3"
+  pullPolicy: IfNotPresent
+
+# Optimized resources for Preprod BP
+resources:
+  requests:
+    cpu: "2"
+    memory: "6Gi"
+  limits:
+    cpu: "8"
+    memory: "10Gi"
+
+# Features
+features:
+  cpuCores: "8"
+  mithrilSigner: true
+  cncli: true
+
+# Probes configuration
+probes:
+  liveness:
+    initialDelaySeconds: 300
+    periodSeconds: 30
+    failureThreshold: 5
+  readiness:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    failureThreshold: 3
+
+storage:
+  dbPath: /data/cardano/preprod-silem/db
+  privPath: /data/cardano/preprod-silem/priv
+  mithrilPath: /data/cardano/preprod-silem/mithril
+  scriptsPath: /data/cardano/preprod-silem/scripts
+  logsPath: /data/cardano/preprod-silem/logs
+  socketsPath: /data/cardano/preprod-silem/sockets
+  guildDbPath: /data/cardano/preprod-silem/guild-db
+  filesPath: /data/cardano/preprod-silem/files
+  entrypointPath: /data/cardano/preprod-silem/entrypoint-k3s.sh
+
+relays:
+  - address: preprod1.example.com
+    port: 6003
+  - address: preprod2.example.com
+    port: 6007
+  - address: preprod3.example.com
+    port: 4001
+
+# Node placement (production safety)
+nodeSelector:
+  node-role.example.com/preprod-bp: "true"

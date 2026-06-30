@@ -1,0 +1,65 @@
+# Preview BP - SILEM pool
+namespace: preview-bp
+network: preview
+replicaCount: 1
+
+bp:
+  name: preview-silem
+  port: 6772
+  metricsPort: 12797
+  ekgPort: 12807
+  pool: SILEM
+
+image:
+  repository: cardanocommunity/cardano-node
+  tag: "10.5.3"
+  pullPolicy: IfNotPresent
+
+# Optimized resources for Preview BP
+resources:
+  requests:
+    cpu: "500m"
+    memory: "4Gi"
+  limits:
+    cpu: "2"
+    memory: "6Gi"
+
+# Features
+features:
+  cpuCores: "2"
+  mithrilSigner: true
+  cncli: true
+
+# Probes configuration
+probes:
+  liveness:
+    initialDelaySeconds: 300
+    periodSeconds: 30
+    failureThreshold: 5
+  readiness:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    failureThreshold: 3
+
+storage:
+  dbPath: /data/cardano/preview-silem/db
+  privPath: /data/cardano/preview-silem/priv
+  mithrilPath: /data/cardano/preview-silem/mithril
+  scriptsPath: /data/cardano/preview-silem/scripts
+  logsPath: /data/cardano/preview-silem/logs
+  socketsPath: /data/cardano/preview-silem/sockets
+  guildDbPath: /data/cardano/preview-silem/guild-db
+  filesPath: /data/cardano/preview-silem/files
+  entrypointPath: /data/cardano/preview-silem/entrypoint-k3s.sh
+
+relays:
+  - address: preview1.example.com
+    port: 6004
+  - address: preview2.example.com
+    port: 6005
+  - address: preview3.example.com
+    port: 3001
+
+# Node placement (production safety)
+nodeSelector:
+  node-role.example.com/preview-bp: "true"

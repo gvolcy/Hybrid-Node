@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.bp.name }}-topology
+  namespace: {{ .Values.namespace }}
+data:
+  topology.json: |
+    {
+      "bootstrapPeers": [],
+      "localRoots": [
+        {
+          "accessPoints": [
+            {
+              "address": "preprod2.example.com",
+              "port": 6005,
+              "description": "preprod-relay-1"
+            },
+            {
+              "address": "preprod1.example.com",
+              "port": 6004,
+              "description": "preprod-relay-2"
+            },
+            {
+              "address": "preprod3.example.com",
+              "port": 3001,
+              "description": "preprod-relay-3"
+            }
+          ],
+          "advertise": false,
+          "trustable": true,
+          "hotValency": 3,
+          "warmValency": 3
+        }
+      ],
+      "publicRoots": [],
+      "useLedgerAfterSlot": -1
+    }

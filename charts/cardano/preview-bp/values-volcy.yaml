@@ -1,0 +1,65 @@
+# Preview BP - VOLCY pool
+namespace: preview-bp
+network: preview
+replicaCount: 1
+
+bp:
+  name: preview-volcy
+  port: 8782
+  metricsPort: 12799
+  ekgPort: 12809
+  pool: volcy
+
+image:
+  repository: cardanocommunity/cardano-node
+  tag: "10.5.3"
+  pullPolicy: IfNotPresent
+
+# Optimized resources for Preview BP
+resources:
+  requests:
+    cpu: "500m"
+    memory: "4Gi"
+  limits:
+    cpu: "2"
+    memory: "6Gi"
+
+# Features
+features:
+  cpuCores: "2"
+  mithrilSigner: true
+  cncli: true
+
+# Probes configuration
+probes:
+  liveness:
+    initialDelaySeconds: 300
+    periodSeconds: 30
+    failureThreshold: 5
+  readiness:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    failureThreshold: 3
+
+storage:
+  dbPath: /data/cardano/preview-volcy/db
+  privPath: /data/cardano/preview-volcy/priv
+  mithrilPath: /data/cardano/preview-volcy/mithril
+  scriptsPath: /data/cardano/preview-volcy/scripts
+  logsPath: /data/cardano/preview-volcy/logs
+  socketsPath: /data/cardano/preview-volcy/sockets
+  guildDbPath: /data/cardano/preview-volcy/guild-db
+  filesPath: /data/cardano/preview-volcy/files
+  entrypointPath: /data/cardano/preview-volcy/entrypoint-k3s.sh
+
+relays:
+  - address: preview1.example.com
+    port: 6004
+  - address: preview2.example.com
+    port: 6005
+  - address: preview3.example.com
+    port: 3001
+
+# Node placement (production safety)
+nodeSelector:
+  node-role.example.com/preview-bp: "true"

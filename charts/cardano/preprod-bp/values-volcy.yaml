@@ -1,0 +1,65 @@
+# Preprod BP - VOLCY pool
+namespace: preprod-bp
+network: preprod
+replicaCount: 1
+
+bp:
+  name: preprod-volcy
+  port: 8783
+  metricsPort: 12788
+  ekgPort: 12898
+  pool: volcy
+
+image:
+  repository: cardanocommunity/cardano-node
+  tag: "10.5.3"
+  pullPolicy: IfNotPresent
+
+# Optimized resources for Preprod BP (higher than preview)
+resources:
+  requests:
+    cpu: "2"
+    memory: "6Gi"
+  limits:
+    cpu: "8"
+    memory: "10Gi"
+
+# Features
+features:
+  cpuCores: "8"
+  mithrilSigner: true
+  cncli: true
+
+# Probes configuration
+probes:
+  liveness:
+    initialDelaySeconds: 300
+    periodSeconds: 30
+    failureThreshold: 5
+  readiness:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    failureThreshold: 3
+
+storage:
+  dbPath: /data/cardano/preprod-volcy/db
+  privPath: /data/cardano/preprod-volcy/priv
+  mithrilPath: /data/cardano/preprod-volcy/mithril
+  scriptsPath: /data/cardano/preprod-volcy/scripts
+  logsPath: /data/cardano/preprod-volcy/logs
+  socketsPath: /data/cardano/preprod-volcy/sockets
+  guildDbPath: /data/cardano/preprod-volcy/guild-db
+  filesPath: /data/cardano/preprod-volcy/files
+  entrypointPath: /data/cardano/preprod-volcy/entrypoint-k3s.sh
+
+relays:
+  - address: preprod1.example.com
+    port: 6003
+  - address: preprod2.example.com
+    port: 6007
+  - address: preprod3.example.com
+    port: 4001
+
+# Node placement (production safety)
+nodeSelector:
+  node-role.example.com/preprod-bp: "true"
