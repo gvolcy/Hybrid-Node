@@ -353,8 +353,9 @@ helm install apex-relay ./charts/hybrid-node \
   -f charts/hybrid-node/values-apexfusion-relay.yaml
 ```
 
-> 📖 See [docs/deployment.md](docs/deployment.md) for full deployment guide including BP setup,
-> volume mounts, and monitoring.
+> 📖 See [docs/deployment.md](docs/deployment.md) for the full deployment guide (volume mounts,
+> monitoring) and [docs/block-producer-setup.md](docs/block-producer-setup.md) for the end-to-end
+> block producer runbook (keys, topology lock-down, firewall, KES rotation).
 
 ---
 

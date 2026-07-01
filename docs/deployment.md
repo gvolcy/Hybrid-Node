@@ -221,6 +221,7 @@ scripts/health/check-memory.sh <container-name>
 ```
 
 See also:
+- [Block Producer Setup Guide](block-producer-setup.md)
 - [Upgrade Playbook](operations/upgrade-playbook.md)
 - [Rollback Playbook](operations/rollback-playbook.md)
 - [Restart Procedures](operations/restart-procedures.md)
