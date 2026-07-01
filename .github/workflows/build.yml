@@ -17,6 +17,7 @@ on:
           - all
           - cardano
           - apexfusion
+          - leios
       node_version:
         description: 'Override node version (leave empty for default)'
         required: false
@@ -34,6 +35,11 @@ jobs:
   build:
     name: Build ${{ matrix.chain }}
     runs-on: ubuntu-latest
+    # The matrix only covers cardano/apexfusion; a leios-only dispatch is handled
+    # by the dedicated `leios` job below, so skip this job in that case.
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.chain != 'leios'
     permissions:
       contents: read
       packages: write
@@ -120,6 +126,101 @@ jobs:
             CLI_VERSION=${{ steps.versions.outputs.cli_version }}
           cache-from: type=gha,scope=${{ matrix.chain }}
           cache-to: type=gha,mode=max,scope=${{ matrix.chain }}
+
+      - name: Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Published Tags" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ---------------------------------------------------------------------------
+  # Leios is a PROTOTYPE built from cardano-node's `leios-prototype` branch
+  # (from-source Haskell compile). Build args come from chains/leios/versions.env
+  # so that file stays the single source of truth. GHA layer cache keeps repeat
+  # builds fast; only dependency-changing builds pay the full ~1-2h cost.
+  # Skipped on pull_request to avoid multi-hour source builds on every PR.
+  # ---------------------------------------------------------------------------
+  leios:
+    name: Build leios
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      packages: write
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.chain == 'all' ||
+       github.event.inputs.chain == 'leios')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load Leios versions
+        id: leios
+        run: |
+          set -a; . chains/leios/versions.env; set +a
+          # NODE_VERSION_LABEL is like "11.0.1-leios-prototype"; tag uses "11.0.1"
+          VERSION="${NODE_VERSION_LABEL%%-*}"
+          {
+            echo "node_build_ref=${NODE_BUILD_REF}"
+            echo "cli_version=${CLI_VERSION}"
+            echo "ghc_version=${GHC_VERSION}"
+            echo "cabal_version=${CABAL_VERSION}"
+            echo "haskell_image_tag=${HASKELL_IMAGE_TAG}"
+            echo "image_tag=leios-${VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Build: leios"
+            echo "| Parameter | Value |"
+            echo "|-----------|-------|"
+            echo "| Node build ref | ${NODE_BUILD_REF} |"
+            echo "| Version label | ${NODE_VERSION_LABEL} |"
+            echo "| Haskell image | ${HASKELL_IMAGE_TAG} |"
+            echo "| Image tag | leios-${VERSION} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.leios.outputs.image_tag }}
+            type=raw,value=leios,enable={{is_default_branch}}
+            type=sha,prefix=leios-
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: platform/docker/Dockerfile.leios
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NODE_BUILD_REF=${{ steps.leios.outputs.node_build_ref }}
+            CLI_VERSION=${{ steps.leios.outputs.cli_version }}
+            GHC_VERSION=${{ steps.leios.outputs.ghc_version }}
+            CABAL_VERSION=${{ steps.leios.outputs.cabal_version }}
+            HASKELL_IMAGE_TAG=${{ steps.leios.outputs.haskell_image_tag }}
+          cache-from: type=gha,scope=leios
+          cache-to: type=gha,mode=max,scope=leios
 
       - name: Summary
         run: |
