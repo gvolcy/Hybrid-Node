@@ -1118,6 +1118,17 @@ build_node_cmd() {
             ls -la "${priv_pool}/" >&2 2>&1 || warn "Directory does not exist: ${priv_pool}"
         fi
 
+        # Leios BLS signing key — after KES/VRF/op.cert; only when node supports it
+        if [[ "${CMD}" == *"--shelley-kes-key"* ]] && [ -f "${priv_pool}/bls.skey" ]; then
+            if cardano-node run --help 2>&1 | grep -q 'shelley-bls-key'; then
+                chmod 0600 "${priv_pool}/bls.skey" 2>/dev/null || true
+                CMD="${CMD} --shelley-bls-key ${priv_pool}/bls.skey"
+                log "BP mode: BLS key loaded from ${priv_pool}/bls.skey" >&2
+            else
+                log "BP mode: bls.skey present; --shelley-bls-key not in this node build (Leios #776)" >&2
+            fi
+        fi
+
         # Dynamic block forging: start in non-producing mode, enable via SIGHUP
         # This allows zero-downtime KES key rotation and failover:
         #   Enable:  ensure key files exist, then: kill -SIGHUP <node-pid>
