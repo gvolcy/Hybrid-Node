@@ -13,7 +13,7 @@ This is the simplest path to get a node running.
 ### Step 1: Pull the image
 
 ```bash
-docker pull ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
+docker pull ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
 ```
 
 ### Step 2: Run the relay
@@ -30,7 +30,7 @@ docker run -d \
   -p 3001:3001 \
   -p 12798:12798 \
   --restart unless-stopped \
-  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
+  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
 ```
 
 ### Step 3: Monitor sync progress
@@ -84,7 +84,7 @@ docker run -d \
   -v cardano-guild-db:/opt/cardano/cnode/guild-db \
   -p 6000:6000 \
   --restart unless-stopped \
-  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
+  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
 ```
 
 > ⚠️ **BP ports should NOT be public.** Only your relays should connect to the BP port.
@@ -190,21 +190,16 @@ helm install apex-bp ./charts/hybrid-node \
 
 ## Graceful Shutdown
 
-Shutdown is handled by the container entrypoint (PID 1), which traps SIGTERM and
-forwards SIGINT to cardano-node so it can flush its ledger DB and exit cleanly:
+The container uses a 280-second graceful shutdown sequence:
 
-1. K8s sends SIGTERM (or `docker stop`); the entrypoint traps it
-2. The entrypoint sends SIGINT to cardano-node, which flushes its in-memory DB
-3. CNCLI and mithril-signer helpers are stopped (mithril-signer bounded to 15s)
-4. The entrypoint waits for the node to exit (up to 540s; a watchdog SIGKILLs past that)
-5. `terminationGracePeriodSeconds: 600` leaves 60s headroom over the 540s cap
-
-No preStop hook is required — the entrypoint receives SIGTERM directly, so the
-signal always reaches cardano-node (a clean exit is usually only a few seconds).
+1. K8s preStop hook (or `docker stop`) sends SIGINT to cardano-node
+2. Node flushes in-memory DB and writes `db/clean` marker
+3. Container waits for clean marker (up to 280s)
+4. `terminationGracePeriodSeconds: 300` provides 20s headroom
 
 ```bash
-# Use a long timeout for docker stop (≥ the 540s node-drain cap)
-docker stop -t 600 cardano-relay
+# Always use a long timeout for docker stop
+docker stop -t 300 cardano-relay
 ```
 
 ---
@@ -227,7 +222,10 @@ scripts/health/check-memory.sh <container-name>
 
 See also:
 - [Upgrade Playbook](operations/upgrade-playbook.md)
+- [Rollback Playbook](operations/rollback-playbook.md)
 - [Restart Procedures](operations/restart-procedures.md)
 - [Backup & Restore](operations/backup-restore.md)
+- [Resource Requirements & Tuning](operations/resource-tuning.md)
+- [Topology & Custom Peers](operations/topology.md)
 - [Incident Response](operations/incident-response.md)
 - [Secrets Management](security/secrets.md)

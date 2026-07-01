@@ -67,7 +67,7 @@ echo "[$(date +%Y%m%d-%H%M)] DB backup complete"
 
 ```bash
 # Stop the node first
-docker stop -t 600 cardano-relay
+docker stop -t 300 cardano-relay
 
 # Restore DB
 rsync -avz --delete main6:/backup/cardano/mainnet/db/ /opt/cardano/cnode/db/
@@ -86,11 +86,64 @@ docker run -d --name cardano-relay \
   -e NETWORK=mainnet \
   -e MITHRIL_DOWNLOAD=Y \
   -v cardano-db:/opt/cardano/cnode/db \
-  ghcr.io/gvolcy/hybrid-node:cardano-11.0.1
+  ghcr.io/gvolcy/hybrid-node:cardano-10.6.3
 ```
 
 > ℹ️ Mithril bootstrap takes ~30 minutes for Cardano mainnet.
 > Mithril is **not available** for ApexFusion — use NAS backup or full re-sync.
+
+## Kubernetes (K3s / Helm)
+
+### Container-managed backup/restore
+
+The chart exposes two flags that let the entrypoint back up or restore the DB on
+startup (see [values.yaml](../../charts/hybrid-node/values.yaml) → `cardano.enableBackup` /
+`cardano.enableRestore`, wired to `ENABLE_BACKUP` / `ENABLE_RESTORE`):
+
+```yaml
+cardano:
+  enableBackup: "N"    # set "Y" to snapshot the DB on shutdown/startup
+  enableRestore: "N"   # set "Y" to restore from the configured backup on first start
+```
+
+> Leave both `"N"` for normal operation. Flip `enableRestore: "Y"` only for a
+> one-shot bootstrap, then set it back to avoid restoring on every restart.
+
+### Back up a PVC-backed DB
+
+Prefer a **storage-layer snapshot** (VolumeSnapshot / underlying LVM/ZFS) over a
+live file copy — the DB must be quiescent for a consistent file copy.
+
+```bash
+# Option A: graceful stop, then snapshot the PVC via your CSI driver
+kubectl -n <ns> scale statefulset <name> --replicas=0     # clean shutdown
+# ... take a VolumeSnapshot of the DB PVC via your storage class ...
+kubectl -n <ns> scale statefulset <name> --replicas=1
+
+# Option B: rsync from the node's hostPath while stopped (K3s single-node)
+kubectl -n <ns> scale statefulset <name> --replicas=0
+rsync -avz --delete <db-hostpath>/ main6:/backup/cardano/mainnet/db/
+kubectl -n <ns> scale statefulset <name> --replicas=1
+```
+
+### Restore into a PVC
+
+```bash
+kubectl -n <ns> scale statefulset <name> --replicas=0
+rsync -avz --delete main6:/backup/cardano/mainnet/db/ <db-hostpath>/
+kubectl -n <ns> scale statefulset <name> --replicas=1
+```
+
+> ⚠️ For a BP, scaling to 0 stops block production. Do it in a low-risk window and
+> only when relays are healthy. Prefer restoring on a **relay** or a spare node,
+> then promoting.
+
+### Verify a restore
+
+```bash
+kubectl -n <ns> rollout status statefulset <name>
+scripts/health/check-sync.sh <node>     # confirm it resumes from the backup tip
+```
 
 ## Retention Policy
 

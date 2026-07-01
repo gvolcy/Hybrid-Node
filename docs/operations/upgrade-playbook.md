@@ -77,6 +77,33 @@ helm upgrade cardano-relay ./charts/hybrid-node \
   --set image.tag=cardano-<new-version>
 ```
 
+### K3s / StatefulSet rolling upgrade
+
+The chart uses `strategy.type: Recreate` (two nodes can't share one DB), so each
+pod stops before its replacement starts. Upgrade **one release at a time**,
+relays before BPs, verifying sync between each.
+
+```bash
+# 1. Bump the image tag on a relay release (triggers a Recreate rollout)
+helm upgrade <relay-release> ./charts/hybrid-node \
+  -f <relay-values> --set image.tag=cardano-<new-version>
+
+# 2. Watch the rollout and wait for the new pod to become Ready + synced
+kubectl -n <ns> rollout status statefulset <relay-name>
+scripts/health/check-sync.sh <relay-node>
+
+# 3. Repeat for each remaining relay, one at a time (keep >=1 relay up always)
+
+# 4. Only after ALL relays are upgraded and synced, upgrade the BP release
+helm upgrade <bp-release> ./charts/hybrid-node \
+  -f <bp-values> --set image.tag=cardano-<new-version>
+kubectl -n <ns> rollout status statefulset <bp-name>
+scripts/health/check-all.sh <bp-node>
+```
+
+> Pin `image.tag` in your values file (not `latest`) so the running version is
+> explicit and rollback targets are unambiguous.
+
 ## Important Notes
 
 - **Always upgrade relays before BPs** — BPs need relays to be on the same or newer version

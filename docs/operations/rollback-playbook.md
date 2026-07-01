@@ -19,8 +19,8 @@ docker images ghcr.io/gvolcy/hybrid-node --format '{{.Tag}} {{.CreatedAt}}' | so
 ### 2. Stop the current container
 
 ```bash
-# Graceful stop (entrypoint waits up to 540s for a clean node exit)
-docker stop -t 600 cardano-relay
+# Graceful stop (280s shutdown for clean DB)
+docker stop -t 300 cardano-relay
 docker rm cardano-relay
 ```
 
@@ -64,6 +64,29 @@ helm history cardano-relay
 # Roll back to previous revision
 helm rollback cardano-relay <revision-number>
 ```
+
+### K3s / StatefulSet rollback
+
+`helm rollback` reverts values **and** image tag and triggers a `Recreate`
+rollout. Roll back relays and BPs independently, verifying between each.
+
+```bash
+# Roll a release back to the last good revision
+helm rollback <release> <revision-number>
+kubectl -n <ns> rollout status statefulset <name>
+scripts/health/check-sync.sh <node>
+```
+
+If only the image tag needs reverting (values are fine):
+
+```bash
+helm upgrade <release> ./charts/hybrid-node \
+  -f <values-file> --set image.tag=cardano-<old-version>
+```
+
+> If the newer version already migrated the DB to an incompatible format, a
+> rollback of the image alone is **not** enough — restore a pre-upgrade DB backup
+> or re-sync (Mithril for Cardano). See [backup-restore.md](backup-restore.md).
 
 ## Important Notes
 
