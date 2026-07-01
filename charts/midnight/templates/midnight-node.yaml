@@ -46,13 +46,16 @@ spec:
                 secretKeyRef:
                   name: midnight-secrets
                   key: node-key
+            # NOTE: the midnight-node binary does NOT translate the BOOTNODES env
+            # into --bootnodes, so the bootnodes are appended to APPEND_ARGS below.
+            # BOOTNODES is kept for documentation/reference only.
             - name: BOOTNODES
               valueFrom:
                 secretKeyRef:
                   name: midnight-secrets
                   key: bootnodes
             - name: APPEND_ARGS
-              value: {{ .Values.midnightNode.appendArgs | quote }}
+              value: {{ printf "%s --bootnodes %s" .Values.midnightNode.appendArgs .Values.secrets.bootnodes | quote }}
             - name: DB_SYNC_POSTGRES_CONNECTION_STRING
               value: "postgresql://{{ .Values.postgres.user }}:{{ .Values.secrets.postgresPassword }}@postgres:5432/{{ .Values.postgres.db }}?sslmode=disable"
             - name: ALLOW_NON_SSL

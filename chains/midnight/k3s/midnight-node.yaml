@@ -110,13 +110,16 @@ spec:
                 secretKeyRef:
                   name: midnight-secrets
                   key: node-key
+            # NOTE: the midnight-node binary does NOT translate the BOOTNODES env
+            # into --bootnodes, so bootnodes MUST be passed explicitly via
+            # APPEND_ARGS below. BOOTNODES is kept for documentation/reference only.
             - name: BOOTNODES
               valueFrom:
                 secretKeyRef:
                   name: midnight-secrets
                   key: bootnodes
             - name: APPEND_ARGS
-              value: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe"
+              value: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe --bootnodes /dns/bootnode-1.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWK66i7dtGVNSwDh9tTeqov1q6LSdWsRLJvTyzTCaywYgK /dns/bootnode-2.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWHqFfXFwb7WW4jwR8pr4BEf562v5M6c8K3CXAJq4Wx6ym"
             - name: DB_SYNC_POSTGRES_CONNECTION_STRING
               value: "postgresql://postgres:CHANGE-ME@postgres:5432/cexplorer?sslmode=disable"
             - name: ALLOW_NON_SSL
