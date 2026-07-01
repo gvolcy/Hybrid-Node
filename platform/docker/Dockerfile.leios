@@ -38,14 +38,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Build cardano-node (and cardano-cli, which gains the `dijkstra` era commands)
 # from the prototype branch. The branch's cabal.project pins the patched
 # ouroboros-consensus / ouroboros-network commits, so a plain build resolves them.
+#
+# Network-heavy steps (git clone, `cabal update`, dependency download/build) are
+# wrapped in a retry helper because cabal source-repository-package fetches are
+# occasionally flaky (e.g. "[Cabal-7125] Failed to download ... cardano-rpc").
+# The final `cabal build` is NOT retried so genuine compile errors surface fast.
 RUN echo "Building cardano-node (${NODE_BUILD_REF}) for Leios..." && \
-    git clone --depth 50 --branch leios-prototype \
+    retry() { n=0; until "$@"; do n=$((n+1)); [ "$n" -ge 5 ] && echo ">>> giving up after $n attempts: $*" && return 1; s=$((n*30)); echo ">>> attempt $n failed ($*); retrying in ${s}s..."; sleep "$s"; done; } && \
+    retry git clone --depth 50 --branch leios-prototype \
       "${NODE_REPO}" /build/cardano-node && \
     cd /build/cardano-node && \
     if [ "${NODE_BUILD_REF}" != "leios-prototype" ]; then git checkout "${NODE_BUILD_REF}"; fi && \
     echo "package cardano-crypto-praos"     >  cabal.project.local && \
     echo "  flags: -external-libsodium-vrf" >> cabal.project.local && \
-    cabal update && \
+    retry cabal update && \
+    retry cabal build --only-dependencies cardano-node cardano-cli && \
     cabal build cardano-node cardano-cli && \
     mkdir -p /build/bin && \
     cp "$(cabal list-bin cardano-node)" /build/bin/ && \
