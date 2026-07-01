@@ -1,9 +1,10 @@
 # Block Producer Setup Guide
 
-End-to-end runbook for deploying a **Cardano** or **ApexFusion** block producer
-(BP) with the Hybrid-Node image. A BP is the node that holds your pool's hot
-keys and forges blocks. It must run **behind your own relays**, never be exposed
-to the public internet, and never hold cold keys.
+End-to-end runbook for deploying a **Cardano**, **ApexFusion**, or **Leios
+(Musashi Dojo testnet)** block producer (BP) with the Hybrid-Node image. A BP is
+the node that holds your pool's hot keys and forges blocks. It must run **behind
+your own relays**, never be exposed to the public internet, and never hold cold
+keys.
 
 > This guide ties together the deployment, security, and topology docs. Read
 > [Secrets Management](security/secrets.md), [Topology & Custom Peers](operations/topology.md),
@@ -234,7 +235,46 @@ See [chains/apexfusion/README.md](../chains/apexfusion/README.md) for env vars a
 
 ---
 
-## 11. Go-live checklist
+## 11. Leios (Musashi Dojo) differences
+
+Leios runs the same `cardano-node` lineage as Cardano, so the hot-key flow (KES +
+VRF + `op.cert`) and relay-behind-BP topology are **identical**. It is a public
+**testnet** for Ouroboros Leios (CIP-0164) on a **prototype** build — treat it as
+experimental, not a value-bearing mainnet.
+
+- Network: `leios` (Musashi Dojo), **magic 164** (`CARDANO_NODE_NETWORK_ID=164`,
+  `--testnet-magic 164`) instead of `mainnet`/`preprod`.
+- **Prototype node, not a release tag.** It self-reports `11.0.1-leios-prototype`
+  and is built from the `leios-prototype` branch. The fleet image
+  `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` (built by the CI `leios` job) pins git
+  `40888f50` for chain-db compatibility with the IOG prebuilt binary — keep the
+  BP and its relays on the **same pinned build**.
+- **No Mithril.** Bootstrap and recovery are a full re-sync from the bootstrap
+  peer `leios-node.play.dev.cardano.org:3001` (not a snapshot). Use it as a
+  `bootstrapPeer` for initial sync, then lock topology to your own relays.
+- **5 genesis eras** (adds `dijkstra-genesis.json`) and an extra Leios SQLite
+  store (`LeiosDbConfig` → `leios.db`) alongside the ledger DB — size disk and
+  backups accordingly.
+- **Forging may require BLS keys** in addition to KES/VRF/`op.cert`. This is still
+  evolving in the prototype; confirm the current key requirements in
+  [chains/leios/README.md](../chains/leios/README.md#key-differences-from-cardano)
+  before going live, as a lapsed/missing key set silently stops forging.
+- Fleet reference: relays `leiosT1`–`leiosT3`
+  ([relay.yaml](../chains/leios/k3s/relay.yaml),
+  [leiost1.yaml](../chains/leios/k3s/leiost1.yaml)) and BPs `leios-volcy` /
+  `leios-silem`. Env pins live in
+  [chains/leios/versions.env](../chains/leios/versions.env).
+
+> ⚠️ Because the prototype branch and chain can be **reset/rebuilt**, expect
+> occasional full re-syncs and image rebuilds. Do not reuse Leios hot keys or
+> pool identity on mainnet.
+
+See [chains/leios/README.md](../chains/leios/README.md) for the full chain module,
+build source, and manifests.
+
+---
+
+## 12. Go-live checklist
 
 - [ ] Two+ relays synced and healthy
 - [ ] Only `kes.skey`/`hot.skey`, `vrf.skey`, `op.cert` on the BP (`chmod 400`)
@@ -251,6 +291,7 @@ See [chains/apexfusion/README.md](../chains/apexfusion/README.md) for env vars a
 ## Related
 
 - [Deployment Guide](deployment.md)
+- [Leios / Musashi Dojo Chain Module](../chains/leios/README.md)
 - [Secrets Management](security/secrets.md)
 - [Topology & Custom Peers](operations/topology.md)
 - [Host Firewall](security/firewall.md)
