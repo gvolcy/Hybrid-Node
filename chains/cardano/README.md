@@ -192,6 +192,14 @@ kubectl apply -f chains/cardano/k3s/bp.yaml
 - The entrypoint traps `SIGTERM`/`SIGINT` and forwards `SIGINT` to cardano-node so it flushes its ledger DB and exits cleanly (no preStop hook needed). The entrypoint waits up to **540s** for the node to exit, then a watchdog force-kills it.
 - Kubernetes `terminationGracePeriodSeconds` should be set to **600** (60s headroom over the 540s cap); a clean exit is usually only a few seconds.
 
+### gLiveView — Missing Delegator / Stake Panel
+The extended block-production panel in `gLiveView` (Active/Live Stake, Pledge, **Delegators**, Saturation) is populated **only** from a Koios `pool_info` query. If the panel is missing while KES/opcert and Leader/Ideal/Luck stats still show, Koios is disabled or unreachable:
+
+- **Root cause seen in practice:** a container env var `ENABLE_KOIOS=N` (or `KOIOS_API="DISABLED"` in `scripts/env`). This both disables the Koios query and **leaks into gLiveView's login shell**, overriding the `env` file. Editing only the in-pod `env` file is *insufficient* because of this shell-env leak.
+- **Fix:** ensure `ENABLE_KOIOS` is **not** forced to `N`. Leaving it unset (or `Y`) lets gLiveView auto-select the network's Koios endpoint (e.g. `preprod.koios.rest`, `preview.koios.rest`). For a Deployment with drifted config: `kubectl -n <ns> set env deploy/<name> ENABLE_KOIOS-` (triggers a rollout).
+- **Verify:** in the pod, `bash -lc 'echo $ENABLE_KOIOS'` should be empty; `scripts/env` should have `ENABLE_KOIOS`/`KOIOS_API` commented; and `POST {"_pool_bech32_ids":["<pool>"]}` to `<net>.koios.rest/api/v1/pool_info` should return data (not `[]`). Relaunch gLiveView to see the panel.
+- **ApexFusion note:** this panel cannot be shown for ApexFusion (Prime/afpt) pools — there is no ApexFusion Koios API (their data services are DB Sync / Blockfrost / UTxORPC), and ApexFusion pools are not indexed by Cardano's public Koios (returns `[]`). It would require self-hosting a Koios stack against that chain.
+
 ---
 
 ## Upstream Documentation
