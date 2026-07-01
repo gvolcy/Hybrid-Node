@@ -47,7 +47,7 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 |------|------|----------|-------|
 | **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
 | **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, **Leios BPs** | Non-production workloads. **leios-volcy** + **leios-silem** (Hybrid-Node image, private topology). |
-| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** (nominal) | Primary relay. K3s cluster (Discord bots). leiosT1 interim on main2 while offline. |
+| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** | Primary relay (:3010). K3s cluster (Discord bots). |
 | **main4** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT2** | Secondary Leios relay (:3010) for BP peering redundancy. |
 | **main5** | Relays + AI | Cardano mainnet, Leios (**leiosT3**) | Tertiary Leios relay (:3010). AI sandbox (Ollama). |
 | **main6** | NAS / Storage | — | Backup target. DB snapshots, AI memory, cold key storage (offline). |
@@ -87,7 +87,7 @@ Hybrid-Node
 │
 ├── Leios (Ouroboros Leios — Musashi Dojo)
 │   └── musashi (leios, magic 164) → Option B: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
-│       Relays: leiosT1 (main2 interim / main3 :3010), leiosT2 (main4 :3010), leiosT3 (main5 :3010)
+│       Relays: leiosT1 (main3 :3010), leiosT2 (main4 :3010), leiosT3 (main5 :3010)
 │       BPs: leios-volcy (main2 :6000), leios-silem (main2 :6001)
 │       Fleet node pin: git 40888f50 (chain-db compatible); HEAD CLI for Dijkstra txs
 │       On-chain: stake + pool registered; forging pending upstream BLS (#776)
@@ -256,9 +256,8 @@ Internet / Musashi bootstrap
 ┌─────────────────────────────────────────────────────────────────┐
 │  Relay layer (public :3010, Hybrid-Node image)                  │
 │                                                                 │
-│   main2*: leiosT1 (leiost1)         main4: leiosT2 (leiost2)     main5: leiosT3 (leiost3)   │
-│   Tailscale 100.125.84.24:3010      Tailscale 100.110.37.42:3010  Tailscale 100.125.176.60:3010│
-│   (* interim while main3 offline)                                                             │
+│   main3: leiosT1 (leiost1)         main4: leiosT2 (leiost2)     main5: leiosT3 (leiost3)   │
+│   Tailscale 100.103.135.9:3010      Tailscale 100.110.37.42:3010  Tailscale 100.125.176.60:3010│
 └───────────────┬─────────────────────────────┬─────────────────────────┬─────────────────────┘
                 │         Tailscale mesh        │                         │
                 ▼                               ▼                         ▼
@@ -273,7 +272,7 @@ Internet / Musashi bootstrap
 
 | Node | Role | Host | Namespace | Port | Image |
 |------|------|------|-----------|------|-------|
-| `leiosT1` | relay | main2 (interim) / main3 | `leiost1` | 3010 | `hybrid-node:leios-11.0.1` |
+| `leiosT1` | relay | main3 | `leiost1` | 3010 | `hybrid-node:leios-11.0.1` |
 | `leiosT2` | relay | main4 | `leiost2` | 3010 | `hybrid-node:leios-11.0.1` |
 | `leiosT3` | relay | main5 | `leiost3` | 3010 | `hybrid-node:leios-11.0.1` |
 | `leios-volcy` | BP | main2 | `leios-volcy` | 6000 | `hybrid-node:leios-11.0.1` |

@@ -150,7 +150,7 @@ leios/
 ├── configs/
 │   └── leios/               # Optional config overrides (dir name == NETWORK)
 └── k3s/
-    ├── leiost1.yaml         # leiosT1 relay (Option B — main2 interim / main3)
+    ├── leiost1.yaml         # leiosT1 relay (Option B — main3)
     ├── leiost2.yaml         # leiosT2 relay (Option B — Hybrid-Node, main4)
     ├── leiost3.yaml         # leiosT3 relay (Option B — Hybrid-Node, main5)
     ├── relay.yaml           # Generic relay (Option B — Hybrid-Node image)
@@ -163,7 +163,7 @@ leios/
 
 | Node | Role | Host | Port | Tailscale | Status |
 |------|------|------|------|-----------|--------|
-| `leiosT1` | relay | main2 (interim) / main3 | 3010 | `100.125.84.24` / `100.103.135.9` | deployed |
+| `leiosT1` | relay | main3 | 3010 | `100.103.135.9` | deployed |
 | `leiosT2` | relay | main4 | 3010 | `100.110.37.42` | deployed |
 | `leiosT3` | relay | main5 | 3010 | `100.125.176.60` | deployed |
 | `leios-volcy` | block producer | main2 | 6000 | — | deployed (sync-only; forging pending BLS) |
