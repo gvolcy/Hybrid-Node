@@ -1,0 +1,39 @@
+# Example: Midnight Preview validator with chart-managed secrets
+#
+# This is the common case: the chart renders the postgres + midnight secrets
+# from the values below, and provisions fresh PVCs on the cluster default
+# StorageClass.
+#
+# Usage:
+#   helm install midnight ./charts/midnight -n midnight --create-namespace \
+#     -f charts/midnight/values-preview-example.yaml
+#
+# ⚠️  Replace every CHANGE-ME value before installing. Do NOT commit real keys.
+
+network: preview
+
+secrets:
+  create: true
+  postgresPassword: "CHANGE-ME-generate-a-random-password"
+  # docker run --rm parity/subkey:latest generate-node-key
+  nodeKey: "CHANGE-ME-your-node-private-key-hex"
+  sidechainPubKey: "0xCHANGE-ME-sidechain-public-key"
+  auraPubKey: "0xCHANGE-ME-aura-public-key"
+  grandpaPubKey: "0xCHANGE-ME-grandpa-public-key"
+  bootnodes: "/dns/bootnode-1.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWK66i7dtGVNSwDh9tTeqov1q6LSdWsRLJvTyzTCaywYgK /dns/bootnode-2.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWHqFfXFwb7WW4jwR8pr4BEf562v5M6c8K3CXAJq4Wx6ym"
+
+# Pin the local-path StorageClass explicitly on k3s (optional; empty = default)
+cardanoNode:
+  persistence:
+    storageClass: "local-path"
+dbSync:
+  persistence:
+    storageClass: "local-path"
+postgres:
+  persistence:
+    storageClass: "local-path"
+midnightNode:
+  persistence:
+    storageClass: "local-path"
+  # Expose the validator name on the network
+  appendArgs: "--name midnight-preview-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe"

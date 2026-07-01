@@ -1,0 +1,48 @@
+# Example: Midnight validator using externally-managed secrets + existing PVCs
+#
+# Use this when you manage secrets yourself (e.g. sealed-secrets, Vault, or a
+# manually-applied Secret) and/or you are re-attaching to data volumes that
+# already exist in the cluster (migration, redeploy, restore).
+#
+# Prereqs (must already exist in the target namespace):
+#   • Secret  "postgres-secret"   with key: password
+#   • Secret  "midnight-secrets"  with keys: node-key, sidechain-pub-key,
+#                                  aura-pub-key, grandpa-pub-key, bootnodes
+#   • PVCs    referenced below (existingClaim)
+#
+# Usage:
+#   helm install midnight ./charts/midnight -n midnight \
+#     -f charts/midnight/values-external-example.yaml
+
+network: preview
+
+# Do NOT render secrets from values — bring your own.
+secrets:
+  create: false
+
+# Private registry pull secret (optional)
+imagePullSecrets:
+  - name: ghcr-creds
+
+postgres:
+  persistence:
+    existingClaim: "postgres-data"
+
+cardanoNode:
+  persistence:
+    existingClaim: "cardano-node-data"
+
+dbSync:
+  persistence:
+    existingClaim: "cardano-db-sync-data"
+
+# Ogmios is optional — disable it if nothing consumes the WebSocket bridge.
+ogmios:
+  enabled: false
+
+midnightNode:
+  persistence:
+    existingClaim: "midnight-data"
+  # Sidecar re-inserts keys via RPC; keep enabled unless keys are baked in.
+  keyInserter:
+    enabled: true
