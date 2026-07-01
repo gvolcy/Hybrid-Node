@@ -1,0 +1,75 @@
+{{- if and .Values.cardanoNode.persistence.enabled (not .Values.cardanoNode.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cardano-data
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "cardano-node") | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.cardanoNode.persistence.accessMode }}
+  {{- if .Values.cardanoNode.persistence.storageClass }}
+  storageClassName: {{ .Values.cardanoNode.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.cardanoNode.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardano-node
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "cardano-node") | nindent 4 }}
+spec:
+  replicas: {{ .Values.cardanoNode.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "midnight.selectorLabels" (dict "component" "cardano-node") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "midnight.labels" (dict "ctx" . "component" "cardano-node") | nindent 8 }}
+    spec:
+      {{- include "midnight.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: cardano-node
+          image: "{{ .Values.cardanoNode.image.repository }}:{{ .Values.cardanoNode.image.tag }}"
+          imagePullPolicy: {{ .Values.cardanoNode.image.pullPolicy }}
+          env:
+            - name: NETWORK
+              value: {{ .Values.network | quote }}
+            - name: CARDANO_NODE_SOCKET_PATH
+              value: /ipc/node.socket
+          ports:
+            - containerPort: {{ .Values.cardanoNode.port }}
+              name: p2p
+          volumeMounts:
+            - name: cardano-data
+              mountPath: /data
+            - name: ipc
+              mountPath: /ipc
+          resources:
+            {{- toYaml .Values.cardanoNode.resources | nindent 12 }}
+      volumes:
+        - name: cardano-data
+          persistentVolumeClaim:
+            claimName: {{ .Values.cardanoNode.persistence.existingClaim | default "cardano-data" }}
+        - name: ipc
+          hostPath:
+            path: {{ .Values.ipcHostPath }}
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cardano-node
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "cardano-node") | nindent 4 }}
+spec:
+  selector:
+    {{- include "midnight.selectorLabels" (dict "component" "cardano-node") | nindent 4 }}
+  ports:
+    - port: {{ .Values.cardanoNode.port }}
+      targetPort: {{ .Values.cardanoNode.port }}

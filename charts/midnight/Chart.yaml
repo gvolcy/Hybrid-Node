@@ -1,0 +1,21 @@
+apiVersion: v2
+name: midnight
+description: Midnight validator node + Cardano companion stack (node, db-sync, ogmios, postgres)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - midnight
+  - cardano
+  - db-sync
+  - ogmios
+  - validator
+  - blockchain
+  - k3s
+  - kubernetes
+home: https://github.com/gvolcy/Hybrid-Node
+sources:
+  - https://github.com/gvolcy/Hybrid-Node
+maintainers:
+  - name: gvolcy
+    url: https://github.com/gvolcy

@@ -1,0 +1,174 @@
+# Default values for the midnight chart.
+# This deploys the Midnight validator plus its Cardano companion stack.
+#
+# Install (creates the namespace if missing):
+#   helm install midnight ./charts/midnight -n midnight --create-namespace \
+#     -f my-values.yaml
+#
+# You MUST override the secrets below (or provide an existing secret).
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Network preset used by cardano-node, db-sync and midnight-node
+network: preview
+
+# Optional image pull secrets (for private registries)
+imagePullSecrets: []
+  # - name: ghcr-creds
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# When create=true the chart renders the postgres + midnight secrets from the
+# values below. Set create=false to manage the secrets yourself (they must be
+# named "postgres-secret" and "midnight-secrets").
+secrets:
+  create: true
+  # Postgres password (used by postgres, db-sync and the midnight connection string)
+  postgresPassword: "CHANGE-ME-generate-a-random-password"
+  # libp2p node private key: docker run --rm parity/subkey:latest generate-node-key
+  nodeKey: "CHANGE-ME-your-node-private-key-hex"
+  # Validator keys (hex with 0x prefix)
+  sidechainPubKey: "0xCHANGE-ME-sidechain-public-key"
+  auraPubKey: "0xCHANGE-ME-aura-public-key"
+  grandpaPubKey: "0xCHANGE-ME-grandpa-public-key"
+  # Preview network boot nodes (space-separated multiaddrs)
+  bootnodes: "/dns/bootnode-1.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWK66i7dtGVNSwDh9tTeqov1q6LSdWsRLJvTyzTCaywYgK /dns/bootnode-2.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWHqFfXFwb7WW4jwR8pr4BEf562v5M6c8K3CXAJq4Wx6ym"
+
+# Shared host path for the cardano-node <-> db-sync/ogmios IPC socket
+ipcHostPath: /tmp/midnight-cardano-ipc
+
+# ── Postgres (backing store for cardano-db-sync) ─────────────────────────────
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15.3"
+    pullPolicy: IfNotPresent
+  db: cexplorer
+  user: postgres
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+
+# ── Cardano Node (Preview companion for Midnight) ────────────────────────────
+cardanoNode:
+  image:
+    repository: ghcr.io/intersectmbo/cardano-node
+    tag: "11.0.1"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  port: 3001
+  resources:
+    requests:
+      memory: "6Gi"
+      cpu: "2"
+    limits:
+      memory: "12Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    size: 150Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+
+# ── Cardano DB-Sync ──────────────────────────────────────────────────────────
+dbSync:
+  enabled: true
+  image:
+    repository: ghcr.io/intersectmbo/cardano-db-sync
+    tag: "13.7.0.5"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "8Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+
+# ── Ogmios (optional WebSocket bridge to cardano-node) ───────────────────────
+ogmios:
+  enabled: true
+  image:
+    repository: cardanosolutions/ogmios
+    tag: "v6.14.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  port: 1337
+  nodeConfig: /config/preview/config.json
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1"
+
+# ── Midnight Validator Node ──────────────────────────────────────────────────
+midnightNode:
+  image:
+    repository: midnightntwrk/midnight-node
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  cfgPreset: preview
+  appendArgs: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe"
+  allowNonSsl: "true"
+  cardano:
+    securityParameter: "432"
+    activeSlotsCoeff: "0.05"
+    blockStabilityMargin: "0"
+  ports:
+    rpc: 9944
+    p2p: 30333
+    metrics: 9615
+  service:
+    p2p:
+      type: NodePort
+      nodePort: 30333
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "2"
+    limits:
+      memory: "4Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  # Key-inserter sidecar: injects AURA/GRANDPA/SIDECHAIN keys via RPC and keeps
+  # them loaded (re-checks hourly).
+  keyInserter:
+    enabled: true
+    image:
+      repository: curlimages/curl
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

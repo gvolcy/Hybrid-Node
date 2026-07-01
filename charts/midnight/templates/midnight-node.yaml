@@ -1,0 +1,160 @@
+{{- if and .Values.midnightNode.persistence.enabled (not .Values.midnightNode.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: midnight-data
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "midnight-node") | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.midnightNode.persistence.accessMode }}
+  {{- if .Values.midnightNode.persistence.storageClass }}
+  storageClassName: {{ .Values.midnightNode.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.midnightNode.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: midnight-node
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "midnight-node") | nindent 4 }}
+spec:
+  replicas: {{ .Values.midnightNode.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "midnight.selectorLabels" (dict "component" "midnight-node") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "midnight.labels" (dict "ctx" . "component" "midnight-node") | nindent 8 }}
+    spec:
+      {{- include "midnight.imagePullSecrets" . | nindent 6 }}
+      containers:
+        # ── Midnight Node ────────────────────────────────────────────────
+        - name: midnight-node
+          image: "{{ .Values.midnightNode.image.repository }}:{{ .Values.midnightNode.image.tag }}"
+          imagePullPolicy: {{ .Values.midnightNode.image.pullPolicy }}
+          env:
+            - name: CFG_PRESET
+              value: {{ .Values.midnightNode.cfgPreset | quote }}
+            - name: NODE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: node-key
+            - name: BOOTNODES
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: bootnodes
+            - name: APPEND_ARGS
+              value: {{ .Values.midnightNode.appendArgs | quote }}
+            - name: DB_SYNC_POSTGRES_CONNECTION_STRING
+              value: "postgresql://{{ .Values.postgres.user }}:{{ .Values.secrets.postgresPassword }}@postgres:5432/{{ .Values.postgres.db }}?sslmode=disable"
+            - name: ALLOW_NON_SSL
+              value: {{ .Values.midnightNode.allowNonSsl | quote }}
+            - name: CARDANO_SECURITY_PARAMETER
+              value: {{ .Values.midnightNode.cardano.securityParameter | quote }}
+            - name: CARDANO_ACTIVE_SLOTS_COEFF
+              value: {{ .Values.midnightNode.cardano.activeSlotsCoeff | quote }}
+            - name: BLOCK_STABILITY_MARGIN
+              value: {{ .Values.midnightNode.cardano.blockStabilityMargin | quote }}
+          ports:
+            - containerPort: {{ .Values.midnightNode.ports.rpc }}
+              name: rpc
+            - containerPort: {{ .Values.midnightNode.ports.p2p }}
+              name: p2p
+            - containerPort: {{ .Values.midnightNode.ports.metrics }}
+              name: metrics
+          volumeMounts:
+            - name: midnight-data
+              mountPath: /node
+          resources:
+            {{- toYaml .Values.midnightNode.resources | nindent 12 }}
+        {{- if .Values.midnightNode.keyInserter.enabled }}
+        # ── Key Inserter Sidecar ─────────────────────────────────────────
+        - name: key-inserter
+          image: "{{ .Values.midnightNode.keyInserter.image.repository }}:{{ .Values.midnightNode.keyInserter.image.tag }}"
+          imagePullPolicy: {{ .Values.midnightNode.keyInserter.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/insert-keys.sh"]
+          env:
+            - name: AURA_PUB_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: aura-pub-key
+            - name: GRANDPA_PUB_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: grandpa-pub-key
+            - name: SIDECHAIN_PUB_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: midnight-secrets
+                  key: sidechain-pub-key
+          volumeMounts:
+            - name: key-inserter-script
+              mountPath: /scripts
+          resources:
+            {{- toYaml .Values.midnightNode.keyInserter.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: midnight-data
+          persistentVolumeClaim:
+            claimName: {{ .Values.midnightNode.persistence.existingClaim | default "midnight-data" }}
+        - name: key-inserter-script
+          configMap:
+            name: key-inserter-script
+            defaultMode: 0755
+---
+# ── Services ─────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: midnight-rpc
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "midnight-node") | nindent 4 }}
+spec:
+  selector:
+    {{- include "midnight.selectorLabels" (dict "component" "midnight-node") | nindent 4 }}
+  ports:
+    - port: {{ .Values.midnightNode.ports.rpc }}
+      targetPort: {{ .Values.midnightNode.ports.rpc }}
+      name: rpc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: midnight-p2p
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "midnight-node") | nindent 4 }}
+spec:
+  type: {{ .Values.midnightNode.service.p2p.type }}
+  selector:
+    {{- include "midnight.selectorLabels" (dict "component" "midnight-node") | nindent 4 }}
+  ports:
+    - port: {{ .Values.midnightNode.ports.p2p }}
+      targetPort: {{ .Values.midnightNode.ports.p2p }}
+      {{- if and (eq .Values.midnightNode.service.p2p.type "NodePort") .Values.midnightNode.service.p2p.nodePort }}
+      nodePort: {{ .Values.midnightNode.service.p2p.nodePort }}
+      {{- end }}
+      name: p2p
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: midnight-metrics
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "midnight-node") | nindent 4 }}
+spec:
+  selector:
+    {{- include "midnight.selectorLabels" (dict "component" "midnight-node") | nindent 4 }}
+  ports:
+    - port: {{ .Values.midnightNode.ports.metrics }}
+      targetPort: {{ .Values.midnightNode.ports.metrics }}
+      name: metrics

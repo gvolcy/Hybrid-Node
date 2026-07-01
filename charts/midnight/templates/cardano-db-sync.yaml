@@ -1,0 +1,72 @@
+{{- if .Values.dbSync.enabled }}
+{{- if and .Values.dbSync.persistence.enabled (not .Values.dbSync.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-sync-data
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "cardano-db-sync") | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.dbSync.persistence.accessMode }}
+  {{- if .Values.dbSync.persistence.storageClass }}
+  storageClassName: {{ .Values.dbSync.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.dbSync.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardano-db-sync
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "cardano-db-sync") | nindent 4 }}
+spec:
+  replicas: {{ .Values.dbSync.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "midnight.selectorLabels" (dict "component" "cardano-db-sync") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "midnight.labels" (dict "ctx" . "component" "cardano-db-sync") | nindent 8 }}
+    spec:
+      {{- include "midnight.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: db-sync
+          image: "{{ .Values.dbSync.image.repository }}:{{ .Values.dbSync.image.tag }}"
+          imagePullPolicy: {{ .Values.dbSync.image.pullPolicy }}
+          env:
+            - name: NETWORK
+              value: {{ .Values.network | quote }}
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.db | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+          volumeMounts:
+            - name: ipc
+              mountPath: /node-ipc
+            - name: db-sync-data
+              mountPath: /var/lib
+          resources:
+            {{- toYaml .Values.dbSync.resources | nindent 12 }}
+      volumes:
+        - name: ipc
+          hostPath:
+            path: {{ .Values.ipcHostPath }}
+            type: DirectoryOrCreate
+        - name: db-sync-data
+          persistentVolumeClaim:
+            claimName: {{ .Values.dbSync.persistence.existingClaim | default "db-sync-data" }}
+{{- end }}

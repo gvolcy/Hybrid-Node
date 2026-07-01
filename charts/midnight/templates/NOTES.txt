@@ -1,0 +1,25 @@
+Midnight stack "{{ .Release.Name }}" deployed to namespace "{{ .Release.Namespace }}".
+
+Components:
+  - postgres          {{ if .Values.postgres.enabled }}enabled{{ else }}disabled{{ end }}
+  - cardano-node      enabled  ({{ .Values.cardanoNode.image.repository }}:{{ .Values.cardanoNode.image.tag }})
+  - cardano-db-sync   {{ if .Values.dbSync.enabled }}enabled{{ else }}disabled{{ end }}
+  - cardano-ogmios    {{ if .Values.ogmios.enabled }}enabled{{ else }}disabled{{ end }}
+  - midnight-node     enabled  ({{ .Values.midnightNode.image.repository }}:{{ .Values.midnightNode.image.tag }})
+
+{{- if .Values.secrets.create }}
+{{- if or (eq .Values.secrets.postgresPassword "CHANGE-ME-generate-a-random-password") (eq .Values.secrets.nodeKey "CHANGE-ME-your-node-private-key-hex") }}
+
+⚠️  You are using placeholder secrets. Override them before running for real:
+    secrets.postgresPassword, secrets.nodeKey, secrets.sidechainPubKey,
+    secrets.auraPubKey, secrets.grandpaPubKey
+{{- end }}
+{{- end }}
+
+Check status:
+  kubectl -n {{ .Release.Namespace }} get pods
+  kubectl -n {{ .Release.Namespace }} logs deploy/midnight-node -c midnight-node -f
+
+Midnight RPC (in-cluster):     http://midnight-rpc.{{ .Release.Namespace }}.svc:{{ .Values.midnightNode.ports.rpc }}
+Midnight P2P ({{ .Values.midnightNode.service.p2p.type }}): port {{ .Values.midnightNode.ports.p2p }}
+Prometheus metrics:            :{{ .Values.midnightNode.ports.metrics }}

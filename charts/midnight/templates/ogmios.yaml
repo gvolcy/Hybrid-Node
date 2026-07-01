@@ -1,0 +1,61 @@
+{{- if .Values.ogmios.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardano-ogmios
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "cardano-ogmios") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ogmios.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "midnight.selectorLabels" (dict "component" "cardano-ogmios") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "midnight.labels" (dict "ctx" . "component" "cardano-ogmios") | nindent 8 }}
+    spec:
+      {{- include "midnight.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: ogmios
+          image: "{{ .Values.ogmios.image.repository }}:{{ .Values.ogmios.image.tag }}"
+          imagePullPolicy: {{ .Values.ogmios.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.ogmios.port }}
+              name: websocket
+          command:
+            - /bin/ogmios
+            - --node-socket
+            - /ipc/node.socket
+            - --node-config
+            - {{ .Values.ogmios.nodeConfig | quote }}
+            - --host
+            - 0.0.0.0
+          volumeMounts:
+            - name: ipc
+              mountPath: /ipc
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.ogmios.resources | nindent 12 }}
+      volumes:
+        - name: ipc
+          hostPath:
+            path: {{ .Values.ipcHostPath }}
+            type: DirectoryOrCreate
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cardano-ogmios
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "cardano-ogmios") | nindent 4 }}
+spec:
+  selector:
+    {{- include "midnight.selectorLabels" (dict "component" "cardano-ogmios") | nindent 4 }}
+  ports:
+    - port: {{ .Values.ogmios.port }}
+      targetPort: {{ .Values.ogmios.port }}
+{{- end }}

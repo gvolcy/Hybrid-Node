@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: key-inserter-script
+  labels:
+    {{- include "midnight.labels" (dict "ctx" . "component" "midnight-node") | nindent 4 }}
+data:
+  insert-keys.sh: |
+{{ .Files.Get "files/insert-keys.sh" | indent 4 }}
