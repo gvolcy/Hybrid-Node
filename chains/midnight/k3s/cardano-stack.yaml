@@ -65,10 +65,10 @@ spec:
               mountPath: /ipc
           resources:
             requests:
-              memory: "4Gi"
+              memory: "6Gi"
               cpu: "2"
             limits:
-              memory: "8Gi"
+              memory: "12Gi"
               cpu: "4"
       volumes:
         - name: cardano-data
