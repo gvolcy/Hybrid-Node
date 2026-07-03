@@ -316,6 +316,24 @@ customise_configs() {
                 mv "${main_config}.tmp" "${main_config}"
         fi
 
+        # Leios: persist the EB-closure store (leios.db) inside the DB volume.
+        # The upstream config ships LeiosDbConfig.Filepath="leios.db" (a RELATIVE
+        # path), which the node resolves against its working directory
+        # (${CNODE_HOME}), placing the multi-GB EB-closure store OUTSIDE the
+        # persisted ${DB_DIR} mount. On any restart the store is lost, so
+        # immutable-DB replay cannot resolve CertRBs (endorser-block closures) and
+        # the node aborts with the "#890 gate missed" error. Pin it to an absolute
+        # path inside ${DB_DIR} so it survives restarts and travels with db backups
+        # and relay→BP reseeds. No-op for non-Leios chains (no LeiosDbConfig).
+        local leios_db_path
+        leios_db_path=$(jq -r '.LeiosDbConfig.Filepath // empty' "${main_config}" 2>/dev/null)
+        if [ -n "${leios_db_path}" ] && [ "${leios_db_path}" != "${DB_DIR}/leios.db" ]; then
+            log "Leios: pinning LeiosDbConfig.Filepath -> ${DB_DIR}/leios.db (persist EB-closure store across restarts)"
+            jq --arg p "${DB_DIR}/leios.db" '.LeiosDbConfig.Filepath = $p' \
+                "${main_config}" > "${main_config}.tmp" && \
+                mv "${main_config}.tmp" "${main_config}"
+        fi
+
         # BP nodes: Switch GenesisMode → PraosMode
         # GenesisMode requires ≥5 big ledger peers to reach "CaughtUp" state, but a
         # locked-down BP only connects to its own relays (which aren't big ledger peers).
