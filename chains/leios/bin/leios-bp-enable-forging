@@ -1,0 +1,104 @@
+#!/bin/bash
+# After a BP reaches 100% sync WITHOUT restarts, restore pool keys and enable
+# forging via SIGHUP (avoid pod restart / Issue #890 replay).
+#
+# Usage: leios-bp-enable-forging leios-volcy|leios-silem
+set -euo pipefail
+
+POOL="${1:?usage: leios-bp-enable-forging leios-volcy|leios-silem}"
+case "$POOL" in
+  leios-volcy|leios-silem) ;;
+  *) echo "unknown pool: $POOL" >&2; exit 1 ;;
+esac
+
+NS="$POOL"
+DATA="/data/leios/${POOL}"
+PRIV="${DATA}/priv"
+PRIV_BAK="${PRIV}.bak-sync"
+KUBECTL="${KUBECTL:-kubectl}"
+MAGIC=164
+
+tip=$($KUBECTL exec -n "$NS" "deployment/${POOL}" -- sh -c \
+  "cardano-cli query tip --testnet-magic ${MAGIC} --socket-path /opt/cardano/cnode/sockets/node.socket" \
+  2>/dev/null | jq -r '.syncProgress // "0"')
+
+restarts=$($KUBECTL get pods -n "$NS" -l "app=${POOL}" \
+  -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null || echo "?")
+
+echo "=== enable forging: ${POOL} ==="
+echo "sync: ${tip}%   restarts: ${restarts}"
+
+if awk "BEGIN {exit !(${tip} >= 99.9)}" 2>/dev/null; then
+  :
+else
+  echo "ERROR: sync not at 100% (${tip}%). Wait before restoring keys." >&2
+  exit 1
+fi
+
+if [ "$restarts" != "0" ]; then
+  echo "WARNING: restart count is ${restarts} (expected 0). Proceeding may trigger #890." >&2
+  read -r -p "Continue anyway? [y/N] " ans
+  [[ "${ans,,}" == "y" ]] || exit 1
+fi
+
+# Resolve the RUNNING pod. We inject keys THROUGH the container (kubectl exec)
+# so they land in the pod's actual mount. Copying to the host priv/ dir is NOT
+# reliable: after a sync-start `mv priv priv.bak-sync; mkdir priv`, a running pod
+# keeps the old bind-mounted inode, so host-side writes never reach the node.
+POD=$($KUBECTL get pods -n "$NS" --no-headers 2>/dev/null \
+  | awk -v p="$POOL" '$1 ~ ("^" p "-[a-z0-9]+-") {print $1; exit}')
+[ -n "$POD" ] || { echo "ERROR: no running pod for ${POOL}" >&2; exit 1; }
+
+# Key source: prefer the hidden backup captured at sync start.
+SRC="$PRIV_BAK"; sudo test -d "$SRC" || SRC="$PRIV"
+sudo test -d "$SRC" || { echo "ERROR: no key dir at ${PRIV_BAK} or ${PRIV}" >&2; exit 1; }
+
+# Operational (HOT) keys only. NEVER push cold.skey / cold.counter onto a hot BP.
+HOT_KEYS="kes.skey vrf.skey op.cert kes.vkey vrf.vkey bls.skey bls.vkey bls.pop bls.hash"
+POOL_DIR="/opt/cardano/cnode/priv/pool"
+
+echo "Injecting operational keys into ${POD}:${POOL_DIR} (through the container)..."
+$KUBECTL exec -n "$NS" "$POD" -c cardano-node -- sh -c "mkdir -p ${POOL_DIR}"
+for f in $HOT_KEYS; do
+  sudo test -f "${SRC}/${f}" || continue
+  sudo cat "${SRC}/${f}" \
+    | $KUBECTL exec -i -n "$NS" "$POD" -c cardano-node -- sh -c "cat > ${POOL_DIR}/${f}"
+done
+$KUBECTL exec -n "$NS" "$POD" -c cardano-node -- sh -c \
+  "chmod 600 ${POOL_DIR}/* 2>/dev/null || true; echo 'pool dir now:'; ls -1 ${POOL_DIR}"
+
+echo "Sending SIGHUP (kill -1) to enable dynamic forging (no restart)..."
+$KUBECTL exec -n "$NS" "$POD" -c cardano-node -- sh -c \
+  'pid=$(pgrep -x cardano-node | head -1); [ -n "$pid" ] || { echo "no cardano-node pid" >&2; exit 1; }; kill -1 "$pid"'
+
+echo "Waiting for forging reconfiguration..."
+sleep 6
+
+echo "=== node still up / tip ==="
+$KUBECTL exec -n "$NS" "$POD" -c cardano-node -- sh -c \
+  "cardano-cli query tip --testnet-magic ${MAGIC} --socket-path /opt/cardano/cnode/sockets/node.socket" \
+  | jq -c '{block, sync: .syncProgress}'
+
+echo "=== forging status ==="
+if $KUBECTL exec -n "$NS" "$POD" -c cardano-node -- sh -c \
+     'curl -s -m4 127.0.0.1:12798/metrics 2>/dev/null | grep -iE "forge|about_to_lead|kesperiod"'; then
+  echo "-> forging metrics present: block forging is ENABLED."
+else
+  echo "-> WARNING: no forging metrics yet."
+  echo "   If the log below says 'Disabling block forging ... make the credentials"
+  echo "   files available again', the node was started WITHOUT credential CLI args"
+  echo "   and SIGHUP alone cannot enable forging. The node must be STARTED with the"
+  echo "   keys already present so the entrypoint adds --shelley-kes/vrf/op-cert."
+  echo "   Fix at the source: leios-bp-sync-start should keep keys at ${PRIV} with"
+  echo "   START_AS_NON_PRODUCING=true (safe: non-producing until this SIGHUP)."
+fi
+$KUBECTL exec -n "$NS" "$POD" -c cardano-node -- sh -c \
+  "grep -iE 'block forging|Enabled|Disabling|credential' /opt/cardano/cnode/logs/*.json 2>/dev/null | tail -3" || true
+
+echo
+echo "NOTE: Do NOT set CUSTOM_PEERS on this BP without BOOTSTRAP_PEERS — on the"
+echo "      running image the entrypoint would rebuild the topology with"
+echo "      bootstrapPeers:[] (EB-starved) and the node would crash with #890."
+echo "      The EB-connected topology is pinned via the TOPOLOGY env var."
+echo "      If a BP ever restarts into an #890 replay loop, re-seed from the relay:"
+echo "        chains/leios/bin/leios-bp-seed-from-relay ${POOL}"

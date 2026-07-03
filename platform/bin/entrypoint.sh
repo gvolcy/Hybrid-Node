@@ -474,9 +474,14 @@ customise_configs() {
     # Enable CHATTR in CNTools if available
     if [ -f "${CNODE_HOME}/scripts/cntools.sh" ]; then
         if grep -qi ENABLE_CHATTR "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null; then
-            sed -i 's/#ENABLE_CHATTR=false/ENABLE_CHATTR=true/g' "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null || true
+            sed -i 's/^#ENABLE_CHATTR=.*/ENABLE_CHATTR=true/' "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null || true
+            sed -i 's/^ENABLE_CHATTR=false/ENABLE_CHATTR=true/' "${CNODE_HOME}/scripts/cntools.sh" 2>/dev/null || true
         fi
     fi
+
+    # CNTools expects priv/wallet/<name>/{base.addr,reward.addr,...}; Leios host wallets
+    # may only have payment.* + stake.addr from manual setup.
+    setup_cntools_wallet_compat
 
     # Patch CNTools getBalanceKoios for the Koios CSV column-order regression.
     # Upstream requests address_utxos as text/csv and parses positionally; the
@@ -485,6 +490,36 @@ customise_configs() {
     # and `$(( ... + _value ))` aborts, crashing "Show wallet" for any wallet
     # holding native tokens. Re-parse the response as JSON via jq instead.
     patch_cntools_koios_balance
+}
+
+# Ensure manually-created wallets are visible to CNTools (base.addr, reward.addr).
+setup_cntools_wallet_compat() {
+    local wallet_root="${CNODE_HOME}/priv/wallet"
+    local dir magic_arg=""
+
+    [ -d "${wallet_root}" ] || return 0
+
+    case "${NETWORK}" in
+        leios) magic_arg="--testnet-magic 164" ;;
+        preview) magic_arg="--testnet-magic 2" ;;
+        preprod) magic_arg="--testnet-magic 1" ;;
+        mainnet) magic_arg="--mainnet" ;;
+        *) return 0 ;;
+    esac
+
+    for dir in "${wallet_root}"/*/; do
+        [ -d "${dir}" ] || continue
+        if [ -f "${dir}/stake.addr" ] && [ ! -e "${dir}/reward.addr" ]; then
+            ln -sf stake.addr "${dir}/reward.addr" 2>/dev/null || cp -a "${dir}/stake.addr" "${dir}/reward.addr"
+        fi
+        if [ ! -f "${dir}/base.addr" ] && [ -f "${dir}/payment.vkey" ] && [ -f "${dir}/stake.vkey" ]; then
+            cardano-cli address build \
+                --payment-verification-key-file "${dir}/payment.vkey" \
+                --stake-verification-key-file "${dir}/stake.vkey" \
+                --out-file "${dir}/base.addr" \
+                ${magic_arg} 2>/dev/null || true
+        fi
+    done
 }
 
 # Replace CNTools getBalanceKoios with a JSON/jq parser (column-order safe).

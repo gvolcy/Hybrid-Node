@@ -1,9 +1,19 @@
 # ============================================================================
 # leios-volcy — Leios / Musashi Dojo Block Producer on K3s (main2)
 # Option B (Hybrid-Node): ghcr.io/gvolcy/hybrid-node:leios-11.0.1
-# Private topology via CUSTOM_PEERS -> leiosT1/leiosT2/leiosT3 (Tailscale :3010).
+# EB-connected topology: BOOTSTRAP_PEERS (public Leios relay) + CUSTOM_PEERS
+# (leiosT1/T2/T3 :3010 localRoots) + USE_LEDGER_AFTER_SLOT. A Leios BP MUST have
+# a bootstrap peer or it is EB-starved and crashes with Issue #890.
+# (Requires the entrypoint that honours BOOTSTRAP_PEERS/USE_LEDGER_AFTER_SLOT;
+#  rebuild the image or apply Dockerfile.entrypoint-overlay.)
 # Keys: /data/leios/leios-volcy/priv  |  Wallet: /data/leios/leios-volcy/wallet
 # Apply: kubectl apply -f leios-volcy.yaml
+#
+# Issue #890 (LeiosCert replay): a fresh sync gets poisoned (its ledger snapshot
+# falls behind an EB body the network no longer serves). RECOVER by seeding the
+# db from the healthy relay:  chains/leios/bin/leios-bp-seed-from-relay leios-volcy
+# At 100%: chains/leios/bin/leios-bp-enable-forging leios-volcy  (SIGHUP, no restart)
+# Liveness probe intentionally omitted — healthcheck restarts mid-sync caused #890 loops.
 # ============================================================================
 ---
 apiVersion: v1
@@ -47,6 +57,10 @@ spec:
         - name: cardano-node
           image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
           imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              add:
+                - LINUX_IMMUTABLE
           command: ["/usr/local/bin/entrypoint.sh"]
           env:
             - name: NETWORK
@@ -61,6 +75,12 @@ spec:
               value: "/opt/cardano/cnode/priv/pool"
             - name: CUSTOM_PEERS
               value: "100.103.135.9:3010,100.110.37.42:3010,100.125.176.60:3010"
+            - name: BOOTSTRAP_PEERS
+              value: "leios-node.play.dev.cardano.org:3001"
+            - name: USE_LEDGER_AFTER_SLOT
+              value: "1000"
+            - name: START_AS_NON_PRODUCING
+              value: "true"
             - name: MITHRIL_DOWNLOAD
               value: "N"
             - name: UPDATE_CHECK
@@ -91,18 +111,12 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 15
             failureThreshold: 240
-          livenessProbe:
+          readinessProbe:
             exec:
               command: ["/bin/bash", "/usr/local/bin/healthcheck.sh"]
             initialDelaySeconds: 120
             periodSeconds: 30
-            failureThreshold: 10
-          readinessProbe:
-            exec:
-              command: ["/bin/bash", "/usr/local/bin/healthcheck.sh"]
-            initialDelaySeconds: 60
-            periodSeconds: 15
-            failureThreshold: 10
+            failureThreshold: 60
           resources:
             requests:
               cpu: "250m"
@@ -123,10 +137,8 @@ spec:
               name: guild-db
             - mountPath: /opt/cardano/cnode/priv/pool
               name: pool-keys
-              readOnly: true
-            - mountPath: /wallet
+            - mountPath: /opt/cardano/cnode/priv/wallet/volcy
               name: wallet
-              readOnly: true
       volumes:
         - name: db
           hostPath:

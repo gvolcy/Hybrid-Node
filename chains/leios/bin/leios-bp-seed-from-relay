@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ============================================================================
+# leios-bp-seed-from-relay — recover a Leios BP stuck in Issue #890.
+#
+# WHY: On the Musashi/Leios testnet a FRESH sync cannot get past the point where
+# the public network stops serving historical endorser-block (EB) bodies. A node
+# applies blocks forward fine (EBs available live) but does NOT persist EB bodies,
+# so its newest ledger snapshot ends up BEHIND a slot whose EB is gone. On the
+# next restart, ledger REPLAY re-applies that slot, cannot re-fetch the EB
+# (replay is local-only) and aborts with "Issue #890 gate missed". The db is then
+# permanently poisoned. Only a CONTINUOUSLY-ONLINE node (a relay) holds recent
+# ledger snapshots PAST the poison.
+#
+# WHAT: Seed the BP's chain db from a healthy relay — copy immutable/ + ledger/ +
+# the protocolMagicId marker (SKIP volatile/, so the node loads the recent
+# snapshot and fetches the last blocks LIVE, where EBs are available — no
+# poisoned replay). Then start the BP non-producing with an EB-connected topology
+# (bootstrapPeers = public bootstrap + our relays + ledger peers). Once at 100%
+# sync, enable forging with leios-bp-enable-forging (SIGHUP, no restart).
+#
+# Run this from the OPERATOR WORKSTATION (it orchestrates both hosts over SSH).
+#
+# Usage:   leios-bp-seed-from-relay <leios-volcy|leios-silem>
+# Env overrides:
+#   BP_HOST          ssh host running the BP            (default: main2)
+#   RELAY_HOST       ssh host running the healthy relay (default: main3)
+#   RELAY_DB         relay chain-db path on RELAY_HOST  (default: /data/leios/leiost1/db)
+#   BOOTSTRAP_PEERS  comma addr:port trusted bootstrap  (default: public Leios relay)
+#   RELAY_PEERS      comma addr:port local relays       (default: leiosT1/T2/T3 :3010)
+# ============================================================================
+set -euo pipefail
+
+POOL="${1:?usage: leios-bp-seed-from-relay <leios-volcy|leios-silem>}"
+case "$POOL" in
+  leios-volcy|leios-silem) ;;
+  *) echo "unknown pool: $POOL" >&2; exit 1 ;;
+esac
+
+BP_HOST="${BP_HOST:-main2}"
+RELAY_HOST="${RELAY_HOST:-main3}"
+RELAY_DB="${RELAY_DB:-/data/leios/leiost1/db}"
+BOOTSTRAP_PEERS="${BOOTSTRAP_PEERS:-leios-node.play.dev.cardano.org:3001}"
+RELAY_PEERS="${RELAY_PEERS:-100.103.135.9:3010,100.110.37.42:3010,100.125.176.60:3010}"
+
+NS="$POOL"
+DATA="/data/leios/${POOL}"
+DB="${DATA}/data/db"
+FILES="${DATA}/data/files"
+PRIV="${DATA}/priv"
+SSH="ssh -o ConnectTimeout=60 -o BatchMode=yes"
+
+# Build the topology.json (bootstrapPeers + localRoots + ledger peers) as JSON.
+boot_ap=$(awk -v s="$BOOTSTRAP_PEERS" 'BEGIN{n=split(s,a,","); for(i=1;i<=n;i++){split(a[i],p,":"); printf "%s{\"address\":\"%s\",\"port\":%s}", (i>1?",":""), p[1], (p[2]==""?3001:p[2])}}')
+local_ap=$(awk -v s="$RELAY_PEERS" 'BEGIN{n=split(s,a,","); for(i=1;i<=n;i++){split(a[i],p,":"); printf "%s{\"address\":\"%s\",\"port\":%s}", (i>1?",":""), p[1], (p[2]==""?3010:p[2])}}')
+n_local=$(awk -v s="$RELAY_PEERS" 'BEGIN{print split(s,a,",")}')
+TOPO=$(cat <<JSON
+{
+  "bootstrapPeers": [ ${boot_ap} ],
+  "localRoots": [ { "accessPoints": [ ${local_ap} ], "advertise": false, "trustable": true, "hotValency": ${n_local}, "warmValency": ${n_local} } ],
+  "publicRoots": [ { "accessPoints": [], "advertise": false } ],
+  "useLedgerAfterSlot": 1000
+}
+JSON
+)
+
+echo "=== seed-from-relay: ${POOL} ==="
+echo "  BP_HOST=${BP_HOST}  RELAY_HOST=${RELAY_HOST}:${RELAY_DB}"
+echo "  bootstrapPeers=[${BOOTSTRAP_PEERS}]  localRoots=[${RELAY_PEERS}]"
+
+echo "--- [1/4] stop BP, park poisoned db, write topology, set env, check keys ---"
+$SSH "$BP_HOST" "TS=\$(date -u +%Y%m%dT%H%M%SZ); K='sudo k3s kubectl'; set -e
+  \$K -n '$NS' scale deployment/'$POOL' --replicas=0; sleep 6
+  if [ -d '$DB' ] && [ \"\$(sudo ls -A '$DB' 2>/dev/null | wc -l)\" -gt 0 ]; then sudo mv '$DB' '$DB'.poison.\$TS; echo \"  parked poisoned db -> $DB.poison.\$TS\"; fi
+  sudo mkdir -p '$DB/immutable' '$DB/ledger' '$DB/volatile'; sudo chown -R 1000:1000 '$DB'
+  sudo mkdir -p '$FILES'
+  printf '%s' '$TOPO' | sudo tee '$FILES/topology.json' >/dev/null
+  sudo chown 1000:1000 '$FILES/topology.json'; sudo chmod 644 '$FILES/topology.json'
+  echo '  operational keys:'; for f in kes.skey vrf.skey op.cert; do sudo test -f '$PRIV'/\$f && echo \"    ok \$f\" || echo \"    MISSING \$f\"; done
+  \$K -n '$NS' set env deployment/'$POOL' CUSTOM_PEERS- >/dev/null 2>&1 || true
+  \$K -n '$NS' set env deployment/'$POOL' NODE_MODE=bp START_AS_NON_PRODUCING=true TOPOLOGY=/opt/cardano/cnode/files/topology.json >/dev/null
+  echo '  env set: NODE_MODE=bp START_AS_NON_PRODUCING=true TOPOLOGY pinned, CUSTOM_PEERS removed'"
+
+echo "--- [2/4] seed chain db from relay (immutable + ledger + protocolMagicId) ---"
+$SSH "$RELAY_HOST" "sudo tar -C '$RELAY_DB' -cf - immutable ledger protocolMagicId 2>/dev/null" \
+  | $SSH "$BP_HOST" "sudo tar -C '$DB' -xf - && sudo chown -R 1000:1000 '$DB' && echo '  seeded:' && sudo ls '$DB'/ledger/"
+
+echo "--- [3/4] start BP ---"
+$SSH "$BP_HOST" "sudo k3s kubectl -n '$NS' scale deployment/'$POOL' --replicas=1"
+
+echo "--- [4/4] verify clean startup (no #890) ---"
+$SSH "$BP_HOST" "K='sudo k3s kubectl'
+  for i in \$(seq 1 20); do
+    P=\$(\$K -n '$NS' get pods --no-headers 2>/dev/null | awk '/$POOL/{print \$1; exit}')
+    ST=\$(\$K -n '$NS' get pod \"\$P\" --no-headers 2>/dev/null | awk '{print \$3}')
+    [ \"\${ST:-}\" = 'Running' ] && break; sleep 6
+  done
+  sleep 20
+  echo -n '  #890: '; \$K -n '$NS' logs \"\$P\" -c cardano-node --tail=-1 2>/dev/null | grep -c 'Issue #890' || true
+  echo '  restarts:' \$(\$K -n '$NS' get pod \"\$P\" -o jsonpath='{.status.containerStatuses[0].restartCount}')
+  \$K -n '$NS' logs \"\$P\" -c cardano-node --tail=-1 2>/dev/null | grep -iE 'Opened lgr|Chain extended' | tail -3 || true"
+
+echo
+echo "Done. When sync reaches 100% with 0 restarts, enable forging (no restart):"
+echo "  ssh ${BP_HOST} 'KUBECTL=\"sudo k3s kubectl\" /home/mvolcy2/bin/leios-bp-enable-forging ${POOL}'"

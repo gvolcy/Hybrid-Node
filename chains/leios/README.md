@@ -166,11 +166,14 @@ leios/
 | `leiosT1` | relay | main3 | 3010 | `100.103.135.9` | deployed |
 | `leiosT2` | relay | main4 | 3010 | `100.110.37.42` | deployed |
 | `leiosT3` | relay | main5 | 3010 | `100.125.176.60` | deployed |
-| `leios-volcy` | block producer | main2 | 6000 | — | deployed (sync-only; forging pending BLS) |
-| `leios-silem` | block producer | main2 | 6001 | — | deployed (sync-only; forging pending BLS) |
+| `leios-volcy` | block producer | main2 | 6000 | — | deployed (forging) |
+| `leios-silem` | block producer | main2 | 6001 | — | deployed (forging) |
 
-The two BPs run privately — their topology peers **only** with all three relays
-(over Tailscale via `CUSTOM_PEERS`), no public or ledger peers.
+The two BPs peer with all three relays (leiosT1/T2/T3 over Tailscale, as
+`localRoots`) **and** with the public Leios bootstrap relay
+(`leios-node.play.dev.cardano.org:3001`) plus ledger peers. The public bootstrap
+is **required**: a Leios BP that peers only with private relays never receives
+endorser-block (EB) bodies and crashes at apply-time with Issue #890.
 
 **On-chain:** both pools registered (5k pledge, 3% margin, 170 ADA cost) with three
 relays in the pool cert. Faucet delegation still pending.
@@ -185,35 +188,107 @@ relays in the pool cert. Faucet delegation still pending.
 | `NODE_MODE` | `relay` | `relay` or `bp` |
 | `NODE_PORT` | `3001` | Node listening port |
 | `MITHRIL_DOWNLOAD` | `N` | Must be `N` — Mithril unavailable for Leios |
-| `CUSTOM_PEERS` | — | Extra peers `addr:port,...` (BP relay lock-down) |
+| `CUSTOM_PEERS` | — | Extra relay peers `addr:port,...` (BP `localRoots`) |
+| `BOOTSTRAP_PEERS` | — | Trusted bootstrap peers `addr:port,...`. **Required for a Leios BP** (EB delivery) or it crashes with #890 |
+| `USE_LEDGER_AFTER_SLOT` | `-1` | Use ledger peers after this slot (`1000` for Leios BPs; `-1` disables) |
 
 ---
 
-## Block Producers (sync-only — forging pending BLS)
+## Block Producers (forging)
 
 Two BPs (`leios-volcy`, `leios-silem`) are deployed on main2 via
 [`k3s/main2/`](k3s/main2/). They run the prototype `cardano-node` with the
-standard **KES + VRF + op.cert** credentials and a private topology (peering
-only with `leiosT1`/`leiosT2`/`leiosT3`), so they **sync** and are BP-ready.
+standard **KES + VRF + op.cert** credentials and an **EB-connected topology**
+(public bootstrap + leiosT1/T2/T3 + ledger peers), so they sync, survive replay,
+and **forge**.
 
-If sync stalls at a fixed block height or crashes with LeiosCert (Issue #890), scale
-the deployment to 0, move `data/db` aside, create a fresh empty `db/`, and scale
-back to 1. Keys and wallets on the host are not affected.
+### Issue #890 — no-restart policy (critical)
 
-**They do not forge yet.** Verified against the prototype binaries:
+The Musashi prototype can crash on **cold start** with:
+
+`Issue #890 gate missed … cert: LeiosCert`
+
+This is a **ledger replay** bug in the prototype consensus layer — **not** fixed by
+rebuilding the image. Git pin `40888f50725e473d91f40e554e2d436dfc80a924` is correct.
+
+**Root cause.** On this testnet a fresh sync eventually reaches a region where the
+public network no longer serves the historical **endorser-block (EB) bodies**. The
+node applies blocks forward fine (EBs available live) but does **not** persist EB
+bodies, so its newest ledger snapshot ends up **behind** a slot whose EB is gone.
+On the next restart, ledger **replay** re-applies that slot, cannot re-fetch the EB
+(replay is local-only), and aborts with #890. The db is then permanently poisoned.
+Only a **continuously-online** node (a relay) holds recent snapshots past the poison.
+
+**Two things are needed for a healthy BP:**
+1. An **EB-connected topology** (`BOOTSTRAP_PEERS` = public bootstrap, `CUSTOM_PEERS`
+   = relays, `USE_LEDGER_AFTER_SLOT=1000`) so it receives EB bodies while live.
+2. A **non-poisoned db** — seed it from the healthy relay, never a cold fresh sync
+   past the EB wall.
+
+**Operational rules**
+
+| Do | Don't |
+|----|-------|
+| **Seed the db from the healthy relay** (recent snapshot past the poison) | Cold-sync a BP from genesis past the EB wall (→ poisoned db) |
+| Give the BP an **EB-connected topology** (bootstrap + relays + ledger peers) | Peer a BP with private relays only (→ EB-starved → #890) |
+| Keep BPs **online**; snapshot often | Restart a BP whose newest snapshot is behind an un-refetchable EB |
+| Restore keys at 100% via **SIGHUP** (no pod restart) | Recycle the pod to “enable” forging |
+| Leave **leiosT1 / leiosT3** running (they are the golden-db source) | Restart every relay at once (you lose the seed source) |
+
+**Manifest hardening** (in `k3s/main2/*.yaml`):
+
+- `START_AS_NON_PRODUCING=true` — dynamic forging toggle via SIGHUP
+- **No livenessProbe** — mid-sync healthcheck restarts caused crash loops
+- Generous `startupProbe` + relaxed `readinessProbe` (readiness does not kill pods)
+
+**Helper scripts:**
+
+```bash
+# Fleet sync / restart summary (run on main2; set KUBECTL='sudo k3s kubectl')
+chains/leios/bin/leios-fleet-status
+
+# RECOVER a poisoned / #890-looping BP: seed its db from the healthy relay.
+# Run from the operator workstation (orchestrates relay + BP hosts over SSH).
+chains/leios/bin/leios-bp-seed-from-relay leios-volcy
+chains/leios/bin/leios-bp-seed-from-relay leios-silem
+
+# After 100% with 0 restarts — restore keys + SIGHUP (no pod restart)
+ssh main2 'KUBECTL="sudo k3s kubectl" /home/mvolcy2/bin/leios-bp-enable-forging leios-volcy'
+ssh main2 'KUBECTL="sudo k3s kubectl" /home/mvolcy2/bin/leios-bp-enable-forging leios-silem'
+```
+
+> `leios-bp-sync-start` (cold resync from leiosT1 only) is **superseded** for BPs:
+> a cold sync gets poisoned at the EB wall. Use `leios-bp-seed-from-relay` instead.
+
+**Manual recovery** (what `leios-bp-seed-from-relay` automates): scale the BP to 0;
+move `data/db` aside; create a fresh empty `db/`; copy `immutable/`, `ledger/` and
+the `protocolMagicId` marker from the healthy relay's db (**skip** `volatile/`);
+write an EB-connected `data/files/topology.json` (bootstrap + relays +
+`useLedgerAfterSlot:1000`); set `NODE_MODE=bp START_AS_NON_PRODUCING=true` with the
+topology pinned via `TOPOLOGY`; keep operational keys (no `cold.*`) in `priv/`;
+scale to 1. The node loads the recent snapshot and fetches the last blocks live —
+no poisoned replay.
+
+> **Do not `kubectl apply` updated BP manifests while a node is stable** unless the
+> image already honours `BOOTSTRAP_PEERS`/`USE_LEDGER_AFTER_SLOT` (rebuild, or apply
+> `platform/docker/Dockerfile.entrypoint-overlay`). On the old entrypoint, setting
+> `CUSTOM_PEERS` rebuilds the topology with empty `bootstrapPeers` (EB-starved).
+
+**Forging is enabled** with the standard **KES + VRF + op.cert** credentials
+(injected at 100% sync via `leios-bp-enable-forging`, SIGHUP, no restart). BLS is
+**not yet required** by the current release — upstream has announced that a future
+node version will require pools to additionally register a **BLS key**:
 
 | Capability | `cardano-cli` (`dijkstra node ...`) | Status |
 |------------|-------------------------------------|--------|
+| Forge with KES + VRF + op.cert | `cardano-node run --shelley-kes-key ...` | ✅ live |
 | Generate BLS key / hash / PoP | `key-gen-BLS`, `key-hash-BLS`, `issue-pop-BLS` | ✅ available |
-| Register BLS in pool cert | `stake-pool registration-certificate --bls-*` | ❌ not yet |
-| Forge with BLS | `cardano-node run --shelley-bls-key` | ❌ not yet |
+| Register BLS in pool cert | `stake-pool registration-certificate --bls-*` | ⏳ upcoming |
+| Forge with BLS | `cardano-node run --shelley-bls-key` | ⏳ upcoming |
 
 Each pool's full key set — including `bls.{vkey,skey,hash,pop}` — is already
-generated and stored on main2 at `/data/leios/<pool>/priv`. Once upstream ships
-the BLS registration cert fields and the node startup flag, forging is enabled by
-(1) adding `--shelley-bls-key /priv/bls.skey` to the deployment command and
-(2) registering each pool on-chain (with BLS verification key + PoP, pledge, and
-staked tADA from the faucet). Track
+generated and stored on main2 at `/data/leios/<pool>/priv`, ready for when upstream
+ships the BLS registration cert fields and startup flag. Track
 [ouroboros-leios#776](https://github.com/input-output-hk/ouroboros-leios/issues/776)
 and [cardano-cli#1355](https://github.com/IntersectMBO/cardano-cli/pull/1355).
 
