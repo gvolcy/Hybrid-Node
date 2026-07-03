@@ -495,15 +495,15 @@ customise_configs() {
 # Ensure manually-created wallets are visible to CNTools (base.addr, reward.addr).
 setup_cntools_wallet_compat() {
     local wallet_root="${CNODE_HOME}/priv/wallet"
-    local dir magic_arg=""
+    local dir; local -a magic_arg=()
 
     [ -d "${wallet_root}" ] || return 0
 
     case "${NETWORK}" in
-        leios) magic_arg="--testnet-magic 164" ;;
-        preview) magic_arg="--testnet-magic 2" ;;
-        preprod) magic_arg="--testnet-magic 1" ;;
-        mainnet) magic_arg="--mainnet" ;;
+        leios) magic_arg=(--testnet-magic 164) ;;
+        preview) magic_arg=(--testnet-magic 2) ;;
+        preprod) magic_arg=(--testnet-magic 1) ;;
+        mainnet) magic_arg=(--mainnet) ;;
         *) return 0 ;;
     esac
 
@@ -517,7 +517,7 @@ setup_cntools_wallet_compat() {
                 --payment-verification-key-file "${dir}/payment.vkey" \
                 --stake-verification-key-file "${dir}/stake.vkey" \
                 --out-file "${dir}/base.addr" \
-                ${magic_arg} 2>/dev/null || true
+                "${magic_arg[@]}" 2>/dev/null || true
         fi
     done
 }
