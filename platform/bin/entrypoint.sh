@@ -393,7 +393,14 @@ customise_configs() {
         trace_dispatcher=$(jq -r 'if .UseTraceDispatcher == true then "true" elif .UseTraceDispatcher == false then "false" else "missing" end' "${main_config}" 2>/dev/null)
         local has_legacy_traces
         has_legacy_traces=$(jq -r 'if has("TraceMempool") then "yes" else "no" end' "${main_config}" 2>/dev/null)
-        if [ "${trace_dispatcher}" = "true" ] || [ "${trace_dispatcher}" = "missing" ] || [ "${has_legacy_traces}" = "no" ]; then
+        if [ "${NETWORK}" = "leios" ]; then
+            # Leios prototype-2026w27+ (node 11.1.0) REQUIRES the new trace-dispatcher
+            # config (TraceOptions). Converting to legacy scribes makes the node abort at
+            # startup with AesonException "key \"Options\" not found". Keep the pristine
+            # new-tracing config from book.play; its TraceOptions already exposes Prometheus
+            # on 12798, so Guild/gLiveView metrics still work.
+            log "Leios: keeping new trace-dispatcher config (TraceOptions) — required by node 11.1.0"
+        elif [ "${trace_dispatcher}" = "true" ] || [ "${trace_dispatcher}" = "missing" ] || [ "${has_legacy_traces}" = "no" ]; then
             log "Configuring full legacy tracing (UseTraceDispatcher=false) for Guild tools compatibility"
             jq --argjson prom_p "${PROMETHEUS_PORT}" --argjson ekg_p "${EKG_PORT:-12788}" '
               .UseTraceDispatcher = false |
