@@ -5,16 +5,17 @@
 # source-repository-packages pinned in that branch's cabal.project.
 # ============================================================================
 # IMPORTANT: Leios is an experimental testnet (network magic 164). The node is
-# NOT a tagged release — it reports "11.0.1-leios-prototype". Do not use this
-# image on mainnet.
+# NOT a tagged release — it reports "11.1.0-leios-prototype" (prototype-2026w27).
+# Do not use this image on mainnet.
 # Refs:
 #   https://github.com/IntersectMBO/cardano-node/tree/leios-prototype
 #   https://www.musashi.network/   https://leios.cardano-scaling.org/
 # ============================================================================
 
 # ----- Build Arguments -----
-# Leios is a PROTOTYPE: NODE_BUILD_REF is a git BRANCH (not a release tag).
-# The node reports "11.0.1-leios-prototype"; the branch is "leios-prototype".
+# Leios is a PROTOTYPE: NODE_BUILD_REF is a cardano-node commit on the
+# "leios-prototype" branch (versions.env pins the prototype-2026w27 commit).
+# The node reports "11.1.0-leios-prototype".
 ARG NODE_REPO=https://github.com/IntersectMBO/cardano-node.git
 ARG NODE_BUILD_REF=leios-prototype
 ARG CLI_VERSION=leios-prototype

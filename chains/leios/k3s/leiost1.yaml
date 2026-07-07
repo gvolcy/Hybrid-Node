@@ -1,6 +1,6 @@
 # ============================================================================
 # leiosT1 — Leios / Musashi Dojo relay on K3s (main3) — Option B (Hybrid-Node)
-# Image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+# Image: ghcr.io/gvolcy/hybrid-node:leios-11.1.0
 # Tailscale: 100.103.135.9:3010
 # Apply on main3:  kubectl apply -f leiost1.yaml
 # ============================================================================
@@ -41,7 +41,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: cardano-node
-          image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+          image: ghcr.io/gvolcy/hybrid-node:leios-11.1.0
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/entrypoint.sh"]
           env:

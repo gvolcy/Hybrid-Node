@@ -1,6 +1,6 @@
 # ============================================================================
 # leios-volcy — Leios / Musashi Dojo Block Producer on K3s (main2)
-# Option B (Hybrid-Node): ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+# Option B (Hybrid-Node): ghcr.io/gvolcy/hybrid-node:leios-11.1.0
 # EB-connected topology: BOOTSTRAP_PEERS (public Leios relay) + CUSTOM_PEERS
 # (leiosT1/T2/T3 :3010 localRoots) + USE_LEDGER_AFTER_SLOT. A Leios BP MUST have
 # a bootstrap peer or it is EB-starved and crashes with Issue #890.
@@ -55,7 +55,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: cardano-node
-          image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+          image: ghcr.io/gvolcy/hybrid-node:leios-11.1.0
           imagePullPolicy: IfNotPresent
           securityContext:
             capabilities:

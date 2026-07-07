@@ -39,7 +39,7 @@ version pins, and image tags — there is no ambiguous `latest` tag.
 | **Cardano** | `platform/docker/Dockerfile.cardano` | 11.0.1 | `ghcr.io/gvolcy/hybrid-node:cardano-11.0.1` |
 | **ApexFusion** | `platform/docker/Dockerfile.apexfusion` | 10.1.4 | `ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4` |
 | **Midnight** | Pre-built upstream image | 1.0.0 | `midnightntwrk/midnight-node:1.0.0` |
-| **Leios** | `platform/docker/Dockerfile.leios` *(or IOG prebuilt)* | `leios-prototype` | `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` *(or `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest`)* |
+| **Leios** | `platform/docker/Dockerfile.leios` *(or IOG prebuilt)* | `leios-prototype` | `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` *(or `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest`)* |
 
 Version pins for each chain live in `chains/<chain>/versions.env`:
 

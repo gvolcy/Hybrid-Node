@@ -244,10 +244,11 @@ experimental, not a value-bearing mainnet.
 
 - Network: `leios` (Musashi Dojo), **magic 164** (`CARDANO_NODE_NETWORK_ID=164`,
   `--testnet-magic 164`) instead of `mainnet`/`preprod`.
-- **Prototype node, not a release tag.** It self-reports `11.0.1-leios-prototype`
+- **Prototype node, not a release tag.** It self-reports `11.1.0-leios-prototype`
   and is built from the `leios-prototype` branch. The fleet image
-  `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` (built by the CI `leios` job) pins git
-  `40888f50` for chain-db compatibility with the IOG prebuilt binary — keep the
+  `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` (built by the CI `leios` job) pins git
+  `3cc6340a` (prototype-2026w27) for chain-db compatibility with the IOG prebuilt
+  binary — keep the
   BP and its relays on the **same pinned build**.
 - **No Mithril.** Bootstrap and recovery are a full re-sync from the bootstrap
   peer `leios-node.play.dev.cardano.org:3001` (not a snapshot). Use it as a

@@ -86,10 +86,10 @@ Hybrid-Node
 │   └── testnet (afpt) → main2
 │
 ├── Leios (Ouroboros Leios — Musashi Dojo)
-│   └── musashi (leios, magic 164) → Option B: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+│   └── musashi (leios, magic 164) → Option B: ghcr.io/gvolcy/hybrid-node:leios-11.1.0
 │       Relays: leiosT1 (main3 :3010), leiosT2 (main4 :3010), leiosT3 (main5 :3010)
 │       BPs: leios-volcy (main2 :6000), leios-silem (main2 :6001)
-│       Fleet node pin: git 40888f50 (chain-db compatible); HEAD CLI for Dijkstra txs
+│       Fleet node pin: git 3cc6340a (prototype-2026w27, chain-db compatible); HEAD CLI for Dijkstra txs
 │       On-chain: stake + pool registered; forging pending upstream BLS (#776)
 │
 ├── Midnight
@@ -125,7 +125,7 @@ Each chain has its own Dockerfile and version pins:
 > `ouroboros-network`), so it does not consume a tagged release or the prebuilt
 > `cardano-cli` used by the other chains.
 >
-> **Fleet pin:** `chains/leios/versions.env` sets `NODE_BUILD_REF=40888f50` so running
+> **Fleet pin:** `chains/leios/versions.env` sets `NODE_BUILD_REF=3cc6340a` so running
 > nodes stay chain-db compatible with the IOG prebuilt binary. Override at build time for
 > newer CLI features (e.g. `make build-leios NODE_BUILD_REF=7c357a55` for Dijkstra cert/tx
 > fixes); use one-shot pods for cert/tx work without upgrading the syncing fleet node.
@@ -244,7 +244,7 @@ platform as Cardano and ApexFusion, but on a **prototype** build with extra laye
 
 ### Fleet topology (deployed)
 
-All live Leios nodes run **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` with
+All live Leios nodes run **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` with
 `NETWORK=leios` and the shared entrypoint. Relays bootstrap from IOG's Musashi peer;
 BPs use a **private topology** (Tailscale only, no public or ledger peers).
 
@@ -272,11 +272,11 @@ Internet / Musashi bootstrap
 
 | Node | Role | Host | Namespace | Port | Image |
 |------|------|------|-----------|------|-------|
-| `leiosT1` | relay | main3 | `leiost1` | 3010 | `hybrid-node:leios-11.0.1` |
-| `leiosT2` | relay | main4 | `leiost2` | 3010 | `hybrid-node:leios-11.0.1` |
-| `leiosT3` | relay | main5 | `leiost3` | 3010 | `hybrid-node:leios-11.0.1` |
-| `leios-volcy` | BP | main2 | `leios-volcy` | 6000 | `hybrid-node:leios-11.0.1` |
-| `leios-silem` | BP | main2 | `leios-silem` | 6001 | `hybrid-node:leios-11.0.1` |
+| `leiosT1` | relay | main3 | `leiost1` | 3010 | `hybrid-node:leios-11.1.0` |
+| `leiosT2` | relay | main4 | `leiost2` | 3010 | `hybrid-node:leios-11.1.0` |
+| `leiosT3` | relay | main5 | `leiost3` | 3010 | `hybrid-node:leios-11.1.0` |
+| `leios-volcy` | BP | main2 | `leios-volcy` | 6000 | `hybrid-node:leios-11.1.0` |
+| `leios-silem` | BP | main2 | `leios-silem` | 6001 | `hybrid-node:leios-11.1.0` |
 
 K3s manifests: `chains/leios/k3s/leiost1.yaml`, `leiost2.yaml`, `leiost3.yaml`,
 `main2/leios-volcy.yaml`, `main2/leios-silem.yaml`.
@@ -345,7 +345,7 @@ The shared [entrypoint](../platform/bin/entrypoint.sh) handles `NETWORK=leios`:
 
 ```bash
 # Default fleet-compatible build (matches IOG prebuilt chain DB):
-make build-leios NODE_BUILD_REF=40888f50725e473d91f40e554e2d436dfc80a924
+make build-leios NODE_BUILD_REF=3cc6340a896eadee5cdbf2b256751d23dc267ba3
 
 # HEAD build (Dijkstra cert/tx fixes — for one-shot CLI pods, not fleet node DB):
 make build-leios NODE_BUILD_REF=7c357a5531cc3316e9f708f4465eb66db564d8aa

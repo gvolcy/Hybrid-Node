@@ -8,7 +8,7 @@
 
 image:
   repository: ghcr.io/gvolcy/hybrid-node
-  tag: "leios-11.0.1"
+  tag: "leios-11.1.0"
 
 cardano:
   network: leios           # Ouroboros Leios (Musashi Dojo, magic 164)

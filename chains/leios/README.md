@@ -96,11 +96,11 @@ There are two image options for a Leios relay:
 | Option | Image | Build | Includes | Use when |
 |--------|-------|-------|----------|----------|
 | **A — Prebuilt (IOG)** | `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest` | none (pull) | node + cli + pinned configs | You just want a synced relay fast |
-| **B — Hybrid-Node** | `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` ✅ built & pushed | `make build-leios` (~1–2h source compile) | + Guild tooling, healthcheck, entrypoint | You want full platform consistency |
+| **B — Hybrid-Node** | `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` ✅ built & pushed | `make build-leios` (~1–2h source compile) | + Guild tooling, healthcheck, entrypoint | You want full platform consistency |
 
 > The **`leiosT1` / `leiosT2` / `leiosT3`** relays and **`leios-volcy` / `leios-silem`** BPs run
-> **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.0.1` with the shared entrypoint.
-> Fleet nodes pin git `40888f50` for chain-db compatibility with the IOG prebuilt binary.
+> **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` with the shared entrypoint.
+> Fleet nodes pin git `3cc6340a` (prototype-2026w27) for chain-db compatibility with the IOG prebuilt binary.
 > One-shot CLI pods can use a HEAD build (`7c357a55`) for Dijkstra cert/tx work.
 
 ### Option A — Prebuilt IOG relay (deployed as `leiosT1`)
@@ -129,7 +129,7 @@ docker run -d \
   -v leios-db:/opt/cardano/cnode/db \
   -p 3001:3001 \
   -p 12798:12798 \
-  ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+  ghcr.io/gvolcy/hybrid-node:leios-11.1.0
 
 # K3s
 kubectl apply -f chains/leios/k3s/relay.yaml
@@ -208,8 +208,10 @@ The Musashi prototype can crash on **cold start** with:
 
 `Issue #890 gate missed … cert: LeiosCert`
 
-This is a **ledger replay** bug in the prototype consensus layer — **not** fixed by
-rebuilding the image. Git pin `40888f50725e473d91f40e554e2d436dfc80a924` is correct.
+This is a **ledger replay** bug in the prototype consensus layer. Historically this was
+**not** fixed by rebuilding the image; **prototype-2026w27** (git pin `3cc6340a`) is the
+first build to address the #890 class directly (relative `LeiosDbConfig` path + staging-area
+replacement), so keep the fleet on that pin.
 
 **Root cause.** On this testnet a fresh sync eventually reaches a region where the
 public network no longer serves the historical **endorser-block (EB) bodies**. The

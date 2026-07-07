@@ -50,7 +50,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: cardano-node
-          image: ghcr.io/gvolcy/hybrid-node:leios-11.0.1
+          image: ghcr.io/gvolcy/hybrid-node:leios-11.1.0
           imagePullPolicy: IfNotPresent
           env:
             - name: NETWORK
