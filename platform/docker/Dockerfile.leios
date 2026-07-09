@@ -40,8 +40,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # from the prototype branch. The branch's cabal.project pins the patched
 # ouroboros-consensus / ouroboros-network commits, so a plain build resolves them.
 #
-# Network-heavy steps (git clone, `cabal update`, dependency download/build) are
-# wrapped in a retry helper because cabal source-repository-package fetches are
+# NODE_BUILD_REF may live on a feature branch (e.g. bladyjoker/.../2026w27-fixes),
+# not on leios-prototype — fetch the bare SHA instead of cloning a branch.
+#
+# Cabal clones each source-repository-package at the remote's default-branch tip
+# then checks out the pinned tag. Orphaned pins (e.g. f-f/dmq-node@b7d59834,
+# no longer on any branch tip) fail with "Could not parse object". Prefetch
+# every pin by SHA into a local mirror and rewrite location: to file:// so
+# cabal never hits that path.
+#
+# Network-heavy steps are wrapped in a retry helper because cabal fetches are
 # occasionally flaky (e.g. "[Cabal-7125] Failed to download ... cardano-rpc").
 # The final `cabal build` is NOT retried so genuine compile errors surface fast.
 RUN echo "Building cardano-node (${NODE_BUILD_REF}) for Leios..." && \
@@ -50,6 +58,26 @@ RUN echo "Building cardano-node (${NODE_BUILD_REF}) for Leios..." && \
     git init -q && git remote add origin "${NODE_REPO}" && \
     retry git fetch --depth 1 origin "${NODE_BUILD_REF}" && \
     git checkout -q FETCH_HEAD && \
+    mkdir -p /build/src-mirrors && \
+    awk 'BEGIN{loc=""} \
+      /^source-repository-package/{loc=""; next} \
+      /^  location:/{loc=$2; next} \
+      /^  tag:/ && loc!=""{print loc, $2; loc=""}' cabal.project \
+      > /tmp/leios-src-pins && \
+    while read -r loc tag; do \
+        name=$(basename "${loc%.git}"); \
+        dest="/build/src-mirrors/${name}"; \
+        echo ">>> prefetch ${name}@${tag}"; \
+        rm -rf "${dest}" && mkdir -p "${dest}" && \
+        git -C "${dest}" init -q && \
+        git -C "${dest}" remote add origin "${loc}" && \
+        retry git -C "${dest}" fetch --depth 1 origin "${tag}" && \
+        git -C "${dest}" checkout -q -B leios-pin FETCH_HEAD && \
+        awk -v old="${loc}" -v new="file://${dest}" \
+          '$0 == "  location: " old { print "  location: " new; next } { print }' \
+          cabal.project > cabal.project.tmp && \
+        mv cabal.project.tmp cabal.project; \
+      done < /tmp/leios-src-pins && \
     echo "package cardano-crypto-praos"     >  cabal.project.local && \
     echo "  flags: -external-libsodium-vrf" >> cabal.project.local && \
     retry cabal update && \
