@@ -1,0 +1,98 @@
+# ============================================================================
+# Hybrid-Node — tx-firehose (Leios / Musashi Dojo load generator)
+# Builds the `tx-firehose` N2C push-based transaction load generator from
+# cardano-node PR #6613 (branch ch1bo/tx-firehose), which is a fast-forward of
+# the same `leios-prototype` commit pinned by chains/leios/versions.env
+# (NODE_BUILD_REF). See TX_FIREHOSE_REF in that file.
+# https://github.com/IntersectMBO/cardano-node/pull/6613
+# https://github.com/IntersectMBO/cardano-node/tree/bench/tx-firehose
+# ============================================================================
+# NOT for mainnet use — this is a load-testing tool for the Leios prototype
+# testnet (Musashi Dojo, network magic 164) only.
+# ============================================================================
+
+ARG NODE_REPO=https://github.com/IntersectMBO/cardano-node.git
+ARG TX_FIREHOSE_REF=ch1bo/tx-firehose
+ARG GHC_VERSION=9.6.7
+ARG CABAL_VERSION=3.12.1.0
+ARG HASKELL_IMAGE_TAG=9.6.7-3.12.1.0-3
+
+# ============================================================================
+# Stage 1: Build tx-firehose from the ch1bo/tx-firehose branch
+# ============================================================================
+FROM ghcr.io/blinklabs-io/haskell:${HASKELL_IMAGE_TAG} AS build
+
+ARG NODE_REPO
+ARG TX_FIREHOSE_REF
+
+# Same native deps as the leios cardano-node build (shares GHA cache scope, so
+# most dependency packages are already warm).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    liburing-dev libsnappy-dev protobuf-compiler libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Same source-repository-package prefetch dance as Dockerfile.leios: cabal
+# clones each pin at the remote's default-branch tip then checks out the
+# pinned tag, which fails for orphaned pins. Mirror every pin by SHA and
+# rewrite location: to file:// so cabal never hits that path.
+RUN echo "Building tx-firehose (${TX_FIREHOSE_REF})..." && \
+    retry() { n=0; until "$@"; do n=$((n+1)); [ "$n" -ge 5 ] && echo ">>> giving up after $n attempts: $*" && return 1; s=$((n*30)); echo ">>> attempt $n failed ($*); retrying in ${s}s..."; sleep "$s"; done; } && \
+    mkdir -p /build/cardano-node && cd /build/cardano-node && \
+    git init -q && git remote add origin "${NODE_REPO}" && \
+    retry git fetch --depth 1 origin "${TX_FIREHOSE_REF}" && \
+    git checkout -q FETCH_HEAD && \
+    mkdir -p /build/src-mirrors && \
+    awk 'BEGIN{loc=""} \
+      /^source-repository-package/{loc=""; next} \
+      /^  location:/{loc=$2; next} \
+      /^  tag:/ && loc!=""{print loc, $2; loc=""}' cabal.project \
+      > /tmp/leios-src-pins && \
+    while read -r loc tag; do \
+        name=$(basename "${loc%.git}"); \
+        dest="/build/src-mirrors/${name}"; \
+        echo ">>> prefetch ${name}@${tag}"; \
+        rm -rf "${dest}" && mkdir -p "${dest}" && \
+        git -C "${dest}" init -q && \
+        git -C "${dest}" remote add origin "${loc}" && \
+        retry git -C "${dest}" fetch --depth 1 origin "${tag}" && \
+        git -C "${dest}" checkout -q -B leios-pin FETCH_HEAD && \
+        awk -v old="${loc}" -v new="file://${dest}" \
+          '$0 == "  location: " old { print "  location: " new; next } { print }' \
+          cabal.project > cabal.project.tmp && \
+        mv cabal.project.tmp cabal.project; \
+    done < /tmp/leios-src-pins && \
+    echo "package cardano-crypto-praos"     >  cabal.project.local && \
+    echo "  flags: -external-libsodium-vrf" >> cabal.project.local && \
+    retry cabal update && \
+    retry cabal build --only-dependencies tx-firehose && \
+    cabal build tx-firehose && \
+    mkdir -p /build/bin && \
+    cp "$(cabal list-bin tx-firehose)" /build/bin/ && \
+    strip /build/bin/tx-firehose
+
+# ============================================================================
+# Stage 2: Minimal runtime image
+# ============================================================================
+FROM debian:bookworm-slim AS final
+
+LABEL maintainer="VolcyAda <https://github.com/gvolcy>"
+LABEL org.opencontainers.image.title="Hybrid-Node (tx-firehose)"
+LABEL org.opencontainers.image.description="N2C push-based tx load generator for the Leios prototype testnet (Musashi Dojo)"
+LABEL org.opencontainers.image.source="https://github.com/gvolcy/Hybrid-Node"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.hybrid-node.chain="leios"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libsodium23 libsecp256k1-1 liblzma5 libz3-4 \
+    libgmp10 libnuma1 libffi8 libtinfo6 liburing2 libsnappy1v5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /build/bin/tx-firehose /usr/local/bin/tx-firehose
+COPY --from=build /usr/local/lib/libsecp256k1.so.2     /usr/local/lib/
+COPY --from=build /usr/local/lib/libsecp256k1.so.2.0.2 /usr/local/lib/
+RUN ldconfig
+
+RUN useradd -m -u 1000 -s /bin/bash firehose
+USER firehose
+
+ENTRYPOINT ["/usr/local/bin/tx-firehose"]

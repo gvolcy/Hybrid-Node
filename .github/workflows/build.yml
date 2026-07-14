@@ -25,6 +25,7 @@ on:
           - cardano
           - apexfusion
           - leios
+          - tx-firehose
       node_version:
         description: 'Override node version (leave empty for default)'
         required: false
@@ -42,11 +43,12 @@ jobs:
   build:
     name: Build ${{ matrix.chain }}
     runs-on: ubuntu-latest
-    # The matrix only covers cardano/apexfusion; a leios-only dispatch is handled
-    # by the dedicated `leios` job below, so skip this job in that case.
+    # The matrix only covers cardano/apexfusion; a leios or tx-firehose dispatch
+    # is handled by the dedicated jobs below, so skip this job in that case.
     if: >-
       github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.chain != 'leios'
+      (github.event.inputs.chain != 'leios' &&
+       github.event.inputs.chain != 'tx-firehose')
     permissions:
       contents: read
       packages: write
@@ -133,6 +135,90 @@ jobs:
             CLI_VERSION=${{ steps.versions.outputs.cli_version }}
           cache-from: type=gha,scope=${{ matrix.chain }}
           cache-to: type=gha,mode=max,scope=${{ matrix.chain }}
+
+      - name: Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Published Tags" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ---------------------------------------------------------------------------
+  # tx-firehose is a manual load-testing tool (cardano-node#6613), not part of
+  # the regular node fleet — build only on explicit dispatch so it doesn't add
+  # a Haskell compile to every push/PR. Shares the `leios` GHA cache scope
+  # (same leios-prototype dependency tree) so repeat builds are fast.
+  # ---------------------------------------------------------------------------
+  tx-firehose:
+    name: Build tx-firehose
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.chain == 'tx-firehose'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load Leios versions
+        id: leios
+        run: |
+          set -a; . chains/leios/versions.env; set +a
+          {
+            echo "tx_firehose_ref=${TX_FIREHOSE_REF}"
+            echo "ghc_version=${GHC_VERSION}"
+            echo "cabal_version=${CABAL_VERSION}"
+            echo "haskell_image_tag=${HASKELL_IMAGE_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Build: tx-firehose"
+            echo "| Parameter | Value |"
+            echo "|-----------|-------|"
+            echo "| tx-firehose ref | ${TX_FIREHOSE_REF} |"
+            echo "| Haskell image | ${HASKELL_IMAGE_TAG} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=tx-firehose
+            type=sha,prefix=tx-firehose-
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: platform/docker/Dockerfile.tx-firehose
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TX_FIREHOSE_REF=${{ steps.leios.outputs.tx_firehose_ref }}
+            GHC_VERSION=${{ steps.leios.outputs.ghc_version }}
+            CABAL_VERSION=${{ steps.leios.outputs.cabal_version }}
+            HASKELL_IMAGE_TAG=${{ steps.leios.outputs.haskell_image_tag }}
+          cache-from: type=gha,scope=leios
+          cache-to: type=gha,mode=max,scope=leios
 
       - name: Summary
         run: |
