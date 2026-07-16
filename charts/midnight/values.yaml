@@ -126,7 +126,7 @@ ogmios:
 midnightNode:
   image:
     repository: midnightntwrk/midnight-node
-    tag: "1.0.0"
+    tag: "1.0.1"
     pullPolicy: IfNotPresent
   replicaCount: 1
   cfgPreset: preview
