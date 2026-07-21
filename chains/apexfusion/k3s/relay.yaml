@@ -8,10 +8,11 @@
 #   1. Edit POOL_NAME + hostPath base + hostPort per relay instance
 #   2. kubectl apply -f apex-relay.yaml
 #
-# Per-relay customization:
-#   apexR1 (main3): hostPort=4550, POOL_NAME=apexR1, paths=.../apexR1/
-#   apexR2 (main4): hostPort=4551, POOL_NAME=apexR2, paths=.../apexR2/
-#   apexR3 (main5): hostPort=4552, POOL_NAME=apexR3, paths=.../apexR3/
+# Per-relay customization (production):
+#   apexR1 (main3): hostPort=4550, DNS=apex-prime-mainnet1.volcyada.com
+#   apexR2 (main4): hostPort=4551, DNS=apex-prime-mainnet2.volcyada.com
+#   apexR3 (main5): hostPort=4554, DNS=apex-prime-mainnet4.volcyada.com
+# Image: always use ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4 (NOT cardano-*)
 # ============================================================================
 ---
 apiVersion: v1
@@ -55,7 +56,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: cardano-node
-          image: ghcr.io/gvolcy/hybrid-node:latest
+          image: ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
           imagePullPolicy: IfNotPresent
           env:
             - name: NETWORK
@@ -68,6 +69,10 @@ spec:
               value: "4550"
             - name: POOL_NAME
               value: "apexR1"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: MITHRIL_SIGNER
+              value: "N"
             - name: UPDATE_CHECK
               value: "N"
             - name: CPU_CORES

@@ -118,7 +118,7 @@ spec:
               name: priv
       containers:
         - name: apex-node
-          image: ghcr.io/gvolcy/hybrid-node:latest
+          image: ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
           imagePullPolicy: IfNotPresent
           env:
             - name: NETWORK
@@ -141,6 +141,8 @@ spec:
               value: ""
             - name: CARDANO_BLOCK_PRODUCER
               value: "true"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
             - name: MITHRIL_SIGNER
               value: "N"
             - name: CNCLI_ENABLED

@@ -4,7 +4,17 @@ This directory contains ApexFusion Vector chain configurations and deployment ma
 
 [ApexFusion](https://apexfusion.org/) is a multi-chain blockchain platform built on Cardano's Ouroboros consensus. It uses the same `cardano-node` binary as Cardano but with its own genesis files, network topology, and governance. The ApexFusion Vector chain provides a separate execution environment while maintaining compatibility with Cardano's proven infrastructure.
 
-> 🟢 **Production-validated** — Running AFPM and AFPT block producers across 5 servers (9 BPs, 6 relays).
+> 🟢 **Production-validated** — Running AFPM and AFPT across the fleet (primes on main1, relays on main3/main4/main5).
+>
+> **AFPM production map**
+> | Role | Host | Name | Port / DNS |
+> |------|------|------|------------|
+> | BP ×5 | main1 | apex-prime1…5 | 8784 / 8785 / 8787 / 8795 / 8796 |
+> | Relay | main3 | apexR1 | `apex-prime-mainnet1.volcyada.com:4550` |
+> | Relay | main4 | apexR2 | `apex-prime-mainnet2.volcyada.com:4551` |
+> | Relay | main5 | apexR3 | `apex-prime-mainnet4.volcyada.com:4554` |
+>
+> Always use image tag `apexfusion-10.1.4` (not `cardano-*`). ApexFusion has **no** newer validated node bump yet — stay on 10.1.4.
 
 ---
 
@@ -12,7 +22,7 @@ This directory contains ApexFusion Vector chain configurations and deployment ma
 
 | Network | Description | Port (typical) | Status |
 |---------|-------------|----------------|--------|
-| `afpm` | ApexFusion Prime Mainnet | 4550–4554 | ✅ Production |
+| `afpm` | ApexFusion Prime Mainnet | 4550 / 4551 / 4554 | ✅ Production |
 | `afpt` | ApexFusion Prime Testnet | 3535, 3434, 3737 | ✅ Production |
 
 ---

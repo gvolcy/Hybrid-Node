@@ -55,7 +55,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: cardano-node
-          image: ghcr.io/gvolcy/hybrid-node:latest
+          image: ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4
           imagePullPolicy: IfNotPresent
           env:
             - name: NETWORK
