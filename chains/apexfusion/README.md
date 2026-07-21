@@ -14,6 +14,14 @@ This directory contains ApexFusion Vector chain configurations and deployment ma
 > | Relay | main4 | apexR2 | `apex-prime-mainnet2.volcyada.com:4551` |
 > | Relay | main5 | apexR3 | `apex-prime-mainnet4.volcyada.com:4554` |
 >
+> **AFPT production map**
+> | Role | Host | Name | Port / DNS |
+> |------|------|------|------------|
+> | BP ×4 | main2 | apex-test1…4 | 8781 / 8788 / 8790 / 8890 |
+> | Relay | main3 | apexT1 | `apexfusion1.volcyada.com:3535` |
+> | Relay | main4 | apexT2 | `apexfusion2.volcyada.com:3434` |
+> | Relay | main5 | apexT3 | `apexfusion3.volcyada.com:3737` |
+>
 > Always use image tag `apexfusion-10.1.4` (not `cardano-*`). ApexFusion has **no** newer validated node bump yet — stay on 10.1.4.
 
 ---

@@ -8,10 +8,11 @@
 #   1. Edit POOL_NAME + hostPath base + hostPort per relay instance
 #   2. kubectl apply -f apex-testnet-relay.yaml
 #
-# Per-relay customization:
-#   apexT1 (main3): hostPort=3535, POOL_NAME=apexT1, paths=.../apexT1/
-#   apexT2 (main4): hostPort=3536, POOL_NAME=apexT2, paths=.../apexT2/
-#   apexT3 (main5): hostPort=3537, POOL_NAME=apexT3, paths=.../apexT3/
+# Per-relay customization (production AFPT):
+#   apexT1 (main3): hostPort=3535, DNS=apexfusion1.volcyada.com
+#   apexT2 (main4): hostPort=3434, DNS=apexfusion2.volcyada.com
+#   apexT3 (main5): hostPort=3737, DNS=apexfusion3.volcyada.com
+# Image: always use ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4 (NOT cardano-*)
 # ============================================================================
 ---
 apiVersion: v1
@@ -68,6 +69,10 @@ spec:
               value: "3535"
             - name: POOL_NAME
               value: "apexT1"
+            - name: MITHRIL_DOWNLOAD
+              value: "N"
+            - name: MITHRIL_SIGNER
+              value: "N"
             - name: UPDATE_CHECK
               value: "N"
             - name: CPU_CORES
