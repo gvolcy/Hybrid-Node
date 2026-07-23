@@ -67,7 +67,7 @@ Unlike Cardano and ApexFusion, Midnight uses its **own binary** (`midnight-node`
 
 | Component | Version | Source |
 |-----------|---------|--------|
-| `midnight-node` | 1.0.0 | [midnightntwrk/midnight-node](https://hub.docker.com/r/midnightntwrk/midnight-node) |
+| `midnight-node` | 1.0.1 | [midnightntwrk/midnight-node](https://hub.docker.com/r/midnightntwrk/midnight-node) |
 | `cardano-node` (companion) | 11.0.1 | [intersectmbo/cardano-node](https://github.com/IntersectMBO/cardano-node) |
 | `cardano-db-sync` | 13.7.0.5 | [intersectmbo/cardano-db-sync](https://github.com/IntersectMBO/cardano-db-sync) |
 | `ogmios` | v6.14.0 | [cardanosolutions/ogmios](https://github.com/CardanoSolutions/ogmios) |
