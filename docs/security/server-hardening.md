@@ -173,6 +173,17 @@ Names only — no contents read. Notable findings:
 
 SSH private keys and Ollama keys under home are normal. Focus cleanup on **cold.skey** copies that are not required for live ops.
 
+### Quarantine / perms pass (2026-07-23, follow-up)
+
+- main2: Desktop `cardano-keys2` (was world-readable) moved to `~/secure-key-quarantine/2026-07-23/` (`700`/`600`)
+- main2: Apex/Midnight key dirs forced to `700` / `.skey` `600`
+- main6: Apex/Midnight/Cardano pool key dirs forced to `700` / `.skey` `600` (were world-writable on Synology shares)
+- Live ops keys left in place (not deleted). Review quarantine later and destroy offline if duplicated safely.
+
+## Tailscale ACLs
+
+Draft policy: [`tailscale-acl.md`](tailscale-acl.md). Apply in the Tailscale admin console (requires interactive login). Tag Linux hosts `tag:server` after saving. Does not affect public Cardano/Apex P2P.
+
 ## Quick health checks
 
 ```bash
@@ -197,5 +208,6 @@ ssh main1 'sudo fail2ban-client status'
 ## Related docs
 
 - [`firewall.md`](firewall.md) — UFW principles and private metrics ports
+- [`tailscale-acl.md`](tailscale-acl.md) — Tailscale ACL draft (`tag:server`)
 - [`../operations/restart-procedures.md`](../operations/restart-procedures.md) — rolling reboot
 - [`.github/SECURITY.md`](../../.github/SECURITY.md) — vulnerability reporting
