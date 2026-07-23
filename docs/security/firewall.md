@@ -9,9 +9,10 @@ to the outside world.
 
 1. **Default deny incoming.** Every host runs `ufw` with
    `Default: deny (incoming), allow (outgoing)`.
-2. **SSH and Tailscale are never restricted by automation.** Each host has a
-   non-standard SSH port and is reached over Tailscale (`100.64.0.0/10`).
-   These rules are treated as untouchable to avoid lockout.
+2. **SSH is Tailscale + LAN only.** Each host has a non-standard SSH port
+   reached over Tailscale (`100.64.0.0/10`) with LAN (`192.168.0.0/16`)
+   break-glass. Do not re-open SSH to `Anywhere`. Keep at least one working
+   Tailscale path before changing SSH UFW rules.
 3. **Public only what must be public.** Cardano / ApexFusion relay P2P ports,
    relay NodePorts, and public services (e.g. Blockfrost) stay open to
    `Anywhere`. Relays *must* accept inbound connections from arbitrary
@@ -60,9 +61,16 @@ scraped locally via `localhost` or not bound on the host at all.
 | main4 | `12780`, `12784`, `12785`, `12786`, `12788`, `12790`, `12795`, `12796`, `12798`, `12799` (metrics), `9093` (Alertmanager), `9300` (Pushgateway) |
 | main5 | `12798`, `12799`, `12803`, `12813` (apex metrics) |
 
-Left public (unchanged): all SSH ports, Cardano/ApexFusion relay P2P ports,
+Left public (unchanged at that time): all SSH ports, Cardano/ApexFusion relay P2P ports,
 relay NodePorts, Blockfrost (`3000`), Midnight NodePorts, and third-party
 (Xerberus) RPC/P2P ports.
+
+### SSH lockdown (2026-07-23)
+
+SSH ports on **main1–main6** are no longer public. They allow only Tailscale
+(`100.64.0.0/10`, plus Tailscale IPv6 where used) and LAN break-glass
+(`192.168.0.0/16`). Full fleet security stack (Fail2ban, Wazuh, Discord
+alerts, SSH harden) is documented in [`server-hardening.md`](server-hardening.md).
 
 On main1, the real cardano metrics are scraped via the `aquarium` container
 (`:9101/actuator/prometheus`), not `:12798` (nothing binds 12798/12799 on the
