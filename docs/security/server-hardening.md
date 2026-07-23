@@ -79,36 +79,57 @@ MITRE ATT&CK is enabled; most “attacks” observed in ops windows are mapped a
 
 ### 7. Discord alerts (level ≥ 10)
 
-Custom integration on main1:
+Custom integration on main1 (verified end-to-end 2026-07-23):
 
-- Scripts: `/var/ossec/integrations/custom-discord` + `custom-discord.py`
-- Config: single `<integration><name>custom-discord</name>` block in `ossec.conf` (level 10, JSON)
-- Webhook file: `/var/ossec/etc/discord_webhook.url` (mode `640`, `root:wazuh`)
+| Piece | Path / setting |
+|-------|----------------|
+| Wrapper | `/var/ossec/integrations/custom-discord` |
+| Script | `/var/ossec/integrations/custom-discord.py` |
+| Config | single `<integration><name>custom-discord</name>` in `ossec.conf` (`level` 10, `alert_format` json) |
+| Webhook | `/var/ossec/etc/discord_webhook.url` (`640`, `root:wazuh`) |
+| Test rule | `100200` in `local_rules.xml` (match `WAZUH-DISCORD-E2E-TEST`, level 12) |
 
 Webhook source: same Discord channel webhook used by the My-Local-AI bots
 (`discord-webhook-script` ConfigMap on main3 in `openclaw-marketing` /
 `hermes-business`). **Do not commit the URL** to git.
 
-After changing the webhook:
+Implementation notes (gotchas fixed during setup):
+
+- Discord requires `User-Agent: DiscordBot …` or Cloudflare returns 403
+- Wazuh’s bundled Python needs an explicit CA file
+  (`/etc/ssl/certs/ca-certificates.crt`) or HTTPS fails with
+  `CERTIFICATE_VERIFY_FAILED`
+- Keep **one** `custom-discord` integration block only (duplicates double-fire / confuse ops)
+
+After changing the webhook or script:
 
 ```bash
 ssh main1 'sudo systemctl restart wazuh-manager'
 ```
 
-Test ping (from a host that has the URL, or paste into a one-off):
+#### End-to-end test (preferred)
 
 ```bash
-# Prefer using the installed file on main1
+# On main1 — fires rule 100200 → integratord → Discord embed
+logger -t wazuh-test "WAZUH-DISCORD-E2E-TEST from ops"
+# Expect in Discord: "Wazuh L12: Wazuh Discord end-to-end test alert"
+# Expect in ossec.log (integrator.debug=2): Command ran successfully.
+```
+
+#### Webhook-only smoke test
+
+```bash
 ssh main1 'sudo python3 - <<'"'"'PY'"'"'
-import json, urllib.request
+import json, ssl, urllib.request
 from pathlib import Path
 url = Path("/var/ossec/etc/discord_webhook.url").read_text().strip()
+ctx = ssl.create_default_context(cafile="/etc/ssl/certs/ca-certificates.crt")
 req = urllib.request.Request(
     url,
-    data=json.dumps({"username": "Wazuh", "content": "Wazuh Discord test"}).encode(),
-    headers={"Content-Type": "application/json", "User-Agent": "DiscordBot"},
+    data=json.dumps({"username": "Wazuh", "content": "Wazuh Discord webhook smoke"}).encode(),
+    headers={"Content-Type": "application/json", "User-Agent": "DiscordBot (Wazuh, 1.0)"},
 )
-print(urllib.request.urlopen(req, timeout=20).status)
+print(urllib.request.urlopen(req, timeout=20, context=ctx).status)
 PY'
 ```
 
