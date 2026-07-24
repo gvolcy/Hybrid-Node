@@ -7,7 +7,7 @@ the Helm packaging of the manifests in
 [hybrid-node](../hybrid-node) chart conventions.
 
 - Chart version: see [Chart.yaml](Chart.yaml) (`version`)
-- App version: Midnight `1.0.0` (GA line)
+- App version: Midnight `1.0.1` (GA line; Preview genesis reset)
 - Default network: **Preview**
 
 ---
@@ -16,7 +16,7 @@ the Helm packaging of the manifests in
 
 | Component        | Deployment      | Toggle                       | Default image                              |
 |------------------|-----------------|------------------------------|--------------------------------------------|
-| Midnight node    | `midnight-node` | always on                    | `midnightntwrk/midnight-node:1.0.0`        |
+| Midnight node    | `midnight-node` | always on                    | `midnightntwrk/midnight-node:1.0.1`        |
 | Key inserter     | sidecar         | `midnightNode.keyInserter.enabled` | `curlimages/curl:latest`             |
 | Cardano node     | `cardano-node`  | always on                    | `ghcr.io/intersectmbo/cardano-node:11.0.1` |
 | Cardano db-sync  | `cardano-db-sync` | `dbSync.enabled`           | `ghcr.io/intersectmbo/cardano-db-sync:13.7.0.5` |
