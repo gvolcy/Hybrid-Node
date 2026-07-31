@@ -25,19 +25,15 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 │         └────────────────┴────────────────┴────────────────┘          │
 │                          │ Tailscale Mesh                             │
 │                          │                                            │
-│  ┌─────────────┐  ┌─────┴───────┐                                    │
-│  │   main2     │  │   main6     │                                    │
-│  │  Testnet    │  │  NAS/Backup │                                    │
-│  │             │  │             │                                    │
-│  │ Preview     │  │ DB Backups  │                                    │
-│  │ Preprod     │  │ Snapshots   │                                    │
-│  │ Midnight    │  │ AI Memory   │                                    │
-│  │ Guild       │  │ Cold Keys   │                                    │
-│  │ AFPT        │  │ (offline)   │                                    │
-│  │ Leios BPs   │  │             │                                    │
-│  │ leios-volcy │  │             │                                    │
-│  │ leios-silem │  │             │                                    │
-│  └─────────────┘  └─────────────┘                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │   main7     │  │   main2     │  │   main6     │  │             │  │
+│  │  Mac / AI   │  │  Testnet    │  │  NAS/Backup │  │             │  │
+│  │  dev box    │  │             │  │             │  │             │  │
+│  │  M1 Pro     │  │ Preview     │  │ DB Backups  │  │             │  │
+│  │  Wazuh agt  │  │ Preprod     │  │ Snapshots   │  │             │  │
+│  │             │  │ Midnight    │  │ AI Memory   │  │             │  │
+│  │             │  │ Leios BPs   │  │ Cold Keys   │  │             │  │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └─────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,10 +43,12 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 |------|------|----------|-------|
 | **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
 | **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, **Leios BPs** | Non-production workloads. **leios-volcy** + **leios-silem** (Hybrid-Node image, private topology). |
-| **main3** | Relays + K3s | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** | Primary relay (:3010). K3s cluster (Discord bots). |
+| **main3** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** | Primary relay (:3010). Legacy bot K3s scaled to 0 (bots on main7). |
 | **main4** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT2** | Secondary Leios relay (:3010) for BP peering redundancy. |
-| **main5** | Relays + AI | Cardano mainnet, Leios (**leiosT3**) | Tertiary Leios relay (:3010). AI sandbox (Ollama). |
+| **main5** | Relays | Cardano mainnet, Leios (**leiosT3**) | Tertiary Leios relay (:3010). Local Ollama models removed (2026-07-30). |
 | **main6** | NAS / Storage | — | Backup target. DB snapshots, AI memory, cold key storage (offline). |
+| **main7** | GX10 / AI | — | DGX Spark GB10. Ollama (`:11434`) + K3s Discord bots (Jen/Ben/Mario/Marques/Becky/Ara). User `midnigh-sonic`. |
+| **main8** | MacBook | — | Laptop (`gvolcy`). Wazuh agent 010. Tailscale `100.92.119.18`. |
 
 ### Network Security
 
@@ -62,6 +60,8 @@ Internet ──→ main3/main4/main5 (relays, public ports)
               main1 (BPs — NO public ports, relay-only peering)
               main2 (testnets — Tailscale only)
               main6 (NAS — Tailscale only, no inbound)
+              main7 (GX10 AI — Tailscale only)
+              main8 (MacBook — Tailscale only)
 ```
 
 - **Block producers** are never directly reachable from the internet

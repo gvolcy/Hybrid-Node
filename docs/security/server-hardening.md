@@ -9,11 +9,12 @@ Implemented 2026-07-22 / 2026-07-23. Complements [`firewall.md`](firewall.md).
 |--------|---------------------------|----------|
 | main1  | BP / Wazuh manager        | 4077     |
 | main2  | Testnets / Leios BPs      | 4078     |
-| main3  | Relays / Discord bots     | 47       |
+| main3  | Relays (bots moved off)   | 47       |
 | main4  | Relays                    | 48       |
 | main5  | Relays / AI               | 408      |
 | main6  | NAS / backups             | 9790     |
-| main7  | MacBook (`gvolcy`)        | 22 (TS)  |
+| main7  | GX10 AI + Discord K3s     | 22 (TS)  |
+| main8  | MacBook (`gvolcy`)        | 22 (TS)  |
 
 Access path: **Tailscale MagicDNS** (`~/.ssh/config`). Do not expose SSH to the public internet.
 
@@ -59,7 +60,7 @@ See [`firewall.md`](firewall.md) for metrics/private-port history.
 | Manager      | main1                                         |
 | Indexer      | main1                                         |
 | Dashboard    | main1; Tailscale Serve → `https://mvolcy.taild80801.ts.net/` |
-| Agents       | main2–main6, pinned **4.12.0** (held)         |
+| Agents       | main2–main6 + main7 (Mac), **4.14.7-1** (held) |
 | Credentials  | `/root/wazuh-credentials.txt` on main1 (`admin`) |
 
 Dashboard notes:
@@ -90,7 +91,7 @@ Custom integration on main1 (verified end-to-end 2026-07-23):
 | Test rule | `100200` in `local_rules.xml` (match `WAZUH-DISCORD-E2E-TEST`, level 12) |
 
 Webhook source: same Discord channel webhook used by the My-Local-AI bots
-(`discord-webhook-script` ConfigMap on main3 in `openclaw-marketing` /
+(`discord-webhook-script` ConfigMap on **main7** in `openclaw-marketing` /
 `hermes-business`). **Do not commit the URL** to git.
 
 Implementation notes (gotchas fixed during setup):
@@ -133,19 +134,67 @@ print(urllib.request.urlopen(req, timeout=20, context=ctx).status)
 PY'
 ```
 
-## Mac (main7)
+## Linux AI host (main7) — GX10
 
-Hostname: `gregorys-macbook-pro` / `MacBookPro`, user `gvolcy`, Tailscale MagicDNS.
-`ssh main7` works with Linux `id_ed25519` (verified 2026-07-23).
+| Item | Value |
+|------|-------|
+| Tailscale | `gx10-fc00` → **`100.124.81.61`** |
+| SSH | `ssh main7` — user **`midnigh-sonic`**, port **22** |
+| Role | AI supercomputer (fleet security TBD — needs SSH key auth first) |
 
-Baseline (confirmed): FileVault **On**, firewall **enabled**, Tailscale online.
+Apply the same stack as main2–main6 once `ssh main7` works from main1: UFW, Fail2ban, SSH hardening, Wazuh agent → main1, auditd.
 
-Notes from setup:
+## MacBook (main8)
 
-- `authorized_keys` must contain main1’s `~/.ssh/id_ed25519.pub`
-- macOS `sshd_config` **`AllowUsers` must include `gvolcy`** (a prior list of Linux names blocked login)
+| Item | Value |
+|------|-------|
+| Hostname | `gregorys-macbook-pro` |
+| User | `gvolcy` |
+| SSH | `ssh main8` — port **22** (Mac listens on 22, not 525) |
+| Tailscale IP | `100.92.119.18` |
+| Wazuh agent | ID **010** (`MacBookPro`) → manager on main1 |
+| Hardware | MacBook Pro M1 Pro, 16 GB |
+
+### Fleet parity (macOS equivalents)
+
+| Linux fleet (main1–6) | main7 (GX10 Linux) / main8 (macOS) |
+|-------------------------|---------------|
+| UFW default deny + TS/LAN SSH | Application Firewall + **stealth mode** |
+| Fail2ban | Not installed (Tailscale-only SSH; optional later) |
+| SSH `99-hardening.conf` | `PasswordAuthentication no`, `PermitRootLogin no`, `AllowUsers gvolcy` |
+| Wazuh agent → main1 | `/Library/Ossec/bin/wazuh-agentd` (target **4.14.7-1**) |
+| syscollector + SCA | Shared `agent.conf` on main1 + local `ossec.conf` |
+| auditd | macOS `com.apple.auditd` |
+| unattended-upgrades (security) | Software Update auto-check + critical patches |
+
+### One-time setup script
+
+**main8 (Mac):** run on the laptop:
+
+```bash
+sudo bash ~/setup-main7-macos.sh   # legacy filename; targets Mac hardening
+```
+
+**main7 (GX10):** Linux setup once SSH works — same playbook as main2–main6 (UFW, Fail2ban, Wazuh agent, auditd).
+
+**Requires sudo password on the Mac** (not passwordless today).
+
+### Baseline checklist
+
+- [x] FileVault **On**
+- [x] Tailscale online (`100.92.119.18`)
+- [x] Wazuh agent registered on main1 (ID 010, Active)
+- [x] Shared syscollector config pushed from main1 (2026-07-30)
+- [ ] Run `setup-main7-macos.sh` with sudo (firewall stealth, SSH cleanup, Wazuh 4.14.7)
+- [ ] Approve `tag:server` for main7 in Tailscale admin (if not already)
+
+### Notes
+
+- `authorized_keys` must contain main1’s `~/.ssh/id_ed25519.pub` (12 keys present as of 2026-07-30)
+- **`AllowUsers` must be `gvolcy` only** — remove Linux usernames (`mvolcy`, `main2`, …) left from copy-paste
 - Do not edit main1’s `/etc/ssh/sshd_config` when fixing the Mac
 - No pool cold keys / seeds on the laptop; keep auto updates on
+- Bind future AI services (Ollama, APIs) to **Tailscale IP or localhost** — same rule as main5 `:11434`
 
 ## Explicitly not changed
 
@@ -177,7 +226,7 @@ SSH private keys and Ollama keys under home are normal. Focus cleanup on **cold.
 
 ```bash
 # SSH still works over Tailscale
-for h in main1 main2 main3 main4 main5 main6; do
+for h in main1 main2 main3 main4 main5 main6 main7 main8; do
   ssh -o BatchMode=yes -o ConnectTimeout=6 "$h" "echo OK \$(hostname)"
 done
 
