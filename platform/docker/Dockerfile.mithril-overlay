@@ -1,0 +1,32 @@
+# Thin overlay: refresh Mithril signer/client binaries on an existing Cardano image.
+# Avoids a multi-hour from-source node rebuild when only Mithril changed.
+#
+# Build/push example:
+#   docker build -f platform/docker/Dockerfile.mithril-overlay \
+#     --build-arg BASE=ghcr.io/gvolcy/hybrid-node:cardano-11.0.1-nview0.14.0-ep2 \
+#     -t ghcr.io/gvolcy/hybrid-node:cardano-11.0.1-nview0.14.0-ep3 .
+#   docker push ghcr.io/gvolcy/hybrid-node:cardano-11.0.1-nview0.14.0-ep3
+
+ARG BASE=ghcr.io/gvolcy/hybrid-node:cardano-11.0.1-nview0.14.0-ep2
+ARG MITHRIL_RELEASE=2630.0
+
+FROM debian:bookworm-slim AS mithril
+ARG MITHRIL_RELEASE
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /out \
+    && curl -fsSL -o /tmp/mithril.tar.gz \
+      "https://github.com/IntersectMBO/mithril/releases/download/${MITHRIL_RELEASE}/mithril-${MITHRIL_RELEASE}-linux-x64.tar.gz" \
+    && tar -xzf /tmp/mithril.tar.gz -C /out mithril-signer mithril-client \
+    && chmod 755 /out/mithril-signer /out/mithril-client \
+    && /out/mithril-signer --version \
+    && /out/mithril-client --version
+
+FROM ${BASE}
+USER root
+COPY --from=mithril /out/mithril-signer /usr/local/bin/mithril-signer
+COPY --from=mithril /out/mithril-client /usr/local/bin/mithril-client
+RUN chmod 755 /usr/local/bin/mithril-signer /usr/local/bin/mithril-client \
+    && mithril-signer --version \
+    && mithril-client --version
+USER guild
