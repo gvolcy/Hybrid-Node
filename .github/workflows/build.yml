@@ -266,7 +266,7 @@ jobs:
         id: leios
         run: |
           set -a; . chains/leios/versions.env; set +a
-          # NODE_VERSION_LABEL is like "11.0.1-leios-prototype"; tag uses "11.0.1"
+          # NODE_VERSION_LABEL is like "11.1.0-leios-prototype"; tag uses "11.1.0"
           VERSION="${NODE_VERSION_LABEL%%-*}"
           {
             echo "node_build_ref=${NODE_BUILD_REF}"
@@ -274,17 +274,24 @@ jobs:
             echo "ghc_version=${GHC_VERSION}"
             echo "cabal_version=${CABAL_VERSION}"
             echo "haskell_image_tag=${HASKELL_IMAGE_TAG}"
+            echo "g_account=${G_ACCOUNT}"
+            echo "guild_repo=${GUILD_REPO}"
+            echo "guild_deploy_branch=${GUILD_DEPLOY_BRANCH}"
+            echo "leios_release_tag=${LEIOS_RELEASE_TAG}"
             echo "image_tag=leios-${VERSION}"
+            echo "release_image_tag=leios-${LEIOS_RELEASE_TAG}"
           } >> "$GITHUB_OUTPUT"
 
           {
             echo "### Build: leios"
             echo "| Parameter | Value |"
             echo "|-----------|-------|"
+            echo "| IOG release tag | ${LEIOS_RELEASE_TAG} |"
             echo "| Node build ref | ${NODE_BUILD_REF} |"
             echo "| Version label | ${NODE_VERSION_LABEL} |"
+            echo "| Guild branch | ${G_ACCOUNT}/${GUILD_REPO}@${GUILD_DEPLOY_BRANCH} |"
             echo "| Haskell image | ${HASKELL_IMAGE_TAG} |"
-            echo "| Image tag | leios-${VERSION} |"
+            echo "| Image tags | leios-${VERSION}, leios-${LEIOS_RELEASE_TAG} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Extract metadata
@@ -294,6 +301,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ steps.leios.outputs.image_tag }}
+            type=raw,value=${{ steps.leios.outputs.release_image_tag }}
             type=raw,value=leios,enable={{is_default_branch}}
             type=sha,prefix=leios-
 
@@ -312,6 +320,9 @@ jobs:
             GHC_VERSION=${{ steps.leios.outputs.ghc_version }}
             CABAL_VERSION=${{ steps.leios.outputs.cabal_version }}
             HASKELL_IMAGE_TAG=${{ steps.leios.outputs.haskell_image_tag }}
+            G_ACCOUNT=${{ steps.leios.outputs.g_account }}
+            GUILD_REPO=${{ steps.leios.outputs.guild_repo }}
+            GUILD_DEPLOY_BRANCH=${{ steps.leios.outputs.guild_deploy_branch }}
           cache-from: type=gha,scope=leios
           cache-to: type=gha,mode=max,scope=leios
 

@@ -177,10 +177,8 @@ COPY --from=tools /usr/local/bin/cncli /usr/local/bin/
 # guild-operators now has a dedicated `leios` branch (strict superset of
 # `master`: 0 behind / 7 ahead as of 2026-07-14) with native Musashi (magic
 # 164) support: cntools.sh/env read the Dijkstra-era stake-pool-state field
-# names (spsMetadata/spsPledge/spsMargin/spsCost/spsRelays/spsOwners/
-# spsAccountId — Conway's flat .metadata/.pledge/etc are gone in Dijkstra),
-# `env` recognises magic 164 as NETWORK_NAME=Musashi, and CIP-6 extended pool
-# metadata cap is raised 512->1024 bytes. https://github.com/cardano-community/guild-operators/tree/leios
+# Musashi Dijkstra-era Guild tooling comes from the `leios` branch (see
+# chains/leios/versions.env). Build-args override these defaults from CI/Make.
 ARG G_ACCOUNT=cardano-community
 ARG GUILD_REPO=guild-operators
 ARG GUILD_DEPLOY_BRANCH=leios
