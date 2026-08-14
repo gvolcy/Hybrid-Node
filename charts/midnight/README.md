@@ -67,6 +67,8 @@ Full defaults are documented inline in [values.yaml](values.yaml). Highlights:
 | `ipcHostPath` | `/tmp/midnight-cardano-ipc` | Shared hostPath for the cardano-node ↔ db-sync/ogmios IPC socket. |
 | `secrets.create` | `true` | Render `postgres-secret` + `midnight-secrets` from values, or BYO. |
 | `postgres.persistence.size` | `50Gi` | Postgres PVC size. |
+| `postgres.shmSize` | `1Gi` | `/dev/shm` emptyDir size (Memory). |
+| `midnightNode.reservedNodes` | `""` | Optional multiaddrs passed as `--reserved-nodes`. |
 | `cardanoNode.persistence.size` | `150Gi` | Cardano node DB PVC size. |
 | `dbSync.enabled` / `.persistence.size` | `true` / `100Gi` | db-sync toggle + PVC. |
 | `ogmios.enabled` | `true` | Ogmios WebSocket bridge toggle. |

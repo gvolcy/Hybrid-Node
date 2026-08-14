@@ -185,6 +185,18 @@ kubectl exec -n midnight deployment/midnight-node -c key-inserter -- \
 - Boot nodes are configured via the `BOOTNODES` environment variable.
 - Nodes behind NAT may have limited inbound peer connections.
 - Port 30333 (P2P) should be exposed for optimal connectivity.
+- Prefer `--sync warp` in `APPEND_ARGS` for faster catch-up after wipes/restarts.
+- Running two validators (e.g. separate namespaces on one cluster): add
+  `--reserved-nodes /dns/midnight-p2p.<peer-ns>.svc.cluster.local/tcp/30333/ws/p2p/<PEER_ID>`
+  so the pair stays dialed after peer bans or restarts. Get `PEER_ID` via
+  `system_localPeerId` RPC on the peer node.
+
+### Postgres `/dev/shm`
+
+- The k3s/Helm manifests mount a 1Gi `emptyDir` (Memory) at `/dev/shm`.
+- Without this, Postgres can fail with `No space left on device` when resizing
+  shared memory (default container shm is 64Mi), which stalls db-sync and the
+  Midnight partner-chain data source.
 
 ### Key Insertion
 

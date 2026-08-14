@@ -55,7 +55,11 @@ spec:
                   name: midnight-secrets
                   key: bootnodes
             - name: APPEND_ARGS
-              value: {{ printf "%s --bootnodes %s" .Values.midnightNode.appendArgs .Values.secrets.bootnodes | quote }}
+              {{- $args := printf "%s --bootnodes %s" .Values.midnightNode.appendArgs .Values.secrets.bootnodes }}
+              {{- if .Values.midnightNode.reservedNodes }}
+              {{- $args = printf "%s --reserved-nodes %s" $args .Values.midnightNode.reservedNodes }}
+              {{- end }}
+              value: {{ $args | quote }}
             - name: DB_SYNC_POSTGRES_CONNECTION_STRING
               value: "postgresql://{{ .Values.postgres.user }}:{{ .Values.secrets.postgresPassword }}@postgres:5432/{{ .Values.postgres.db }}?sslmode=disable"
             - name: ALLOW_NON_SSL

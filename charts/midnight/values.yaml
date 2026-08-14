@@ -46,6 +46,8 @@ postgres:
     pullPolicy: IfNotPresent
   db: cexplorer
   user: postgres
+  # emptyDir Memory mount at /dev/shm (default k8s shm is 64Mi — too small)
+  shmSize: 1Gi
   resources:
     requests:
       memory: "512Mi"
@@ -130,7 +132,11 @@ midnightNode:
     pullPolicy: IfNotPresent
   replicaCount: 1
   cfgPreset: preview
-  appendArgs: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe"
+  appendArgs: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe --sync warp"
+  # Optional space-separated multiaddrs kept permanently dialed (cross-namespace /
+  # same-host validators). Example:
+  # reservedNodes: "/dns/midnight-p2p.midnight-silem.svc.cluster.local/tcp/30333/ws/p2p/12D3KooW..."
+  reservedNodes: ""
   allowNonSsl: "true"
   cardano:
     securityParameter: "432"
