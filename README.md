@@ -25,7 +25,7 @@ Deploy in seconds.
 
 > 🟢 **Production-validated** — Running across 17+ nodes: Cardano mainnet (VOLCY & SILEM stake
 > pools), ApexFusion Vector (AFPM/AFPT), Midnight Preview, and **Leios / Musashi Dojo**
-> (leiosT1 + leiosT2 relays, leios-volcy + leios-silem BPs on main2/main3/main4).
+> (leiosT1 + leiosT2 + leiosT3 relays, leios-volcy + leios-silem BPs on main2/main3/main4/main5).
 
 ---
 
@@ -92,6 +92,7 @@ GUILD_DEPLOY_BRANCH=main
 |------|------|------|------|
 | leiosT1 | relay | main3 | 3010 |
 | leiosT2 | relay | main4 | 3010 |
+| leiosT3 | relay | main5 | 3010 |
 | leios-volcy | BP | main2 | 6000 |
 | leios-silem | BP | main2 | 6001 |
 
@@ -147,7 +148,8 @@ network configurations at build time.
         │              │  Leios Stack      │                │
         │              │  (Musashi Dojo)   │                │
         │              │  magic 164        │                │
-        │              │  leiosT1/T2 relays│                │
+        │              │  leiosT1/T2/T3    │                │
+        │              │  relays           │                │
         │              │  leios-volcy/silem│                │
         │              └─────────┬─────────┘                │
         │                       │                           │
@@ -227,7 +229,9 @@ Hybrid-Node/
 │       ├── README.md
 │       ├── versions.env            #     Prototype node pins + network params
 │       ├── configs/                #     leios (magic 164)
-│       └── k3s/                    #     leiost1.yaml, relay.yaml
+│       └── k3s/                    #     leiost1.yaml, leiost2.yaml, leiost3.yaml,
+│                                   #     relay.yaml, main2/leios-volcy.yaml,
+│                                   #     main2/leios-silem.yaml
 │
 ├── charts/                         # Helm charts
 │   ├── hybrid-node/                #   Shared chart (Cardano/ApexFusion)
