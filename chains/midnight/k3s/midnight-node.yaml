@@ -118,8 +118,12 @@ spec:
                 secretKeyRef:
                   name: midnight-secrets
                   key: bootnodes
+            # --sync warp: faster catch-up after wipes/restarts on Preview.
+            # Multi-validator (same host / cross-namespace): append e.g.
+            #   --reserved-nodes /dns/midnight-p2p.<peer-ns>.svc.cluster.local/tcp/30333/ws/p2p/<PEER_ID>
+            # so local peers stay connected after bans/restarts.
             - name: APPEND_ARGS
-              value: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe --bootnodes /dns/bootnode-1.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWK66i7dtGVNSwDh9tTeqov1q6LSdWsRLJvTyzTCaywYgK /dns/bootnode-2.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWHqFfXFwb7WW4jwR8pr4BEf562v5M6c8K3CXAJq4Wx6ym"
+              value: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe --sync warp --bootnodes /dns/bootnode-1.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWK66i7dtGVNSwDh9tTeqov1q6LSdWsRLJvTyzTCaywYgK /dns/bootnode-2.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWHqFfXFwb7WW4jwR8pr4BEf562v5M6c8K3CXAJq4Wx6ym"
             - name: DB_SYNC_POSTGRES_CONNECTION_STRING
               value: "postgresql://postgres:CHANGE-ME@postgres:5432/cexplorer?sslmode=disable"
             - name: ALLOW_NON_SSL

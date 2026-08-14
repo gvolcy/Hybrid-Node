@@ -53,6 +53,8 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            - name: dshm
+              mountPath: /dev/shm
           livenessProbe:
             exec:
               command: ["pg_isready", "-U", {{ .Values.postgres.user | quote }}]
@@ -73,6 +75,11 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        # Enlarge /dev/shm beyond the k8s default 64Mi (Postgres shared memory).
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.postgres.shmSize | default "1Gi" | quote }}
 ---
 apiVersion: v1
 kind: Service
