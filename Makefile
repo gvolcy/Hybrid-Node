@@ -23,15 +23,19 @@ else ifeq ($(CHAIN),apexfusion)
   DOCKERFILE := platform/docker/Dockerfile.apexfusion
   TAG := apexfusion-$(NODE_VERSION)
 else ifeq ($(CHAIN),leios)
-  NODE_VERSION ?= 11.0.1
-  CLI_VERSION ?= 11.0.0.0
-  # Leios uses a PROTOTYPE branch, not a release tag. Override if needed:
-  #   make build-leios NODE_BUILD_REF=<branch> NODE_REPO=<git-url>
-  # The node reports "11.0.1-leios-prototype"; the git branch is "leios-prototype".
+  # Defaults mirror chains/leios/versions.env — override as needed:
+  #   make build-leios NODE_BUILD_REF=<commit> LEIOS_RELEASE_TAG=prototype-2026w32
+  NODE_VERSION ?= 11.1.0
+  CLI_VERSION ?= leios-prototype
   NODE_BUILD_REF ?= leios-prototype
   NODE_REPO ?= https://github.com/IntersectMBO/cardano-node.git
+  LEIOS_RELEASE_TAG ?= prototype-2026w32
+  G_ACCOUNT ?= cardano-community
+  GUILD_REPO ?= guild-operators
+  GUILD_DEPLOY_BRANCH ?= leios
   DOCKERFILE := platform/docker/Dockerfile.leios
   TAG := leios-$(NODE_VERSION)
+  RELEASE_TAG := leios-$(LEIOS_RELEASE_TAG)
 else
   $(error Unknown CHAIN=$(CHAIN). Use: cardano, apexfusion, leios)
 endif
@@ -59,7 +63,11 @@ _build-leios:
 	  --build-arg NODE_REPO=$(NODE_REPO) \
 	  --build-arg NODE_BUILD_REF=$(NODE_BUILD_REF) \
 	  --build-arg CLI_VERSION=$(CLI_VERSION) \
-	  -t $(IMAGE_NAME):$(TAG) .
+	  --build-arg G_ACCOUNT=$(G_ACCOUNT) \
+	  --build-arg GUILD_REPO=$(GUILD_REPO) \
+	  --build-arg GUILD_DEPLOY_BRANCH=$(GUILD_DEPLOY_BRANCH) \
+	  -t $(IMAGE_NAME):$(TAG) \
+	  -t $(IMAGE_NAME):$(RELEASE_TAG) .
 
 build-all: build-cardano build-apexfusion ## Build all chain images (leios excluded: prototype ref)
 

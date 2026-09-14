@@ -99,9 +99,8 @@ There are two image options for a Leios relay:
 | **B — Hybrid-Node** | `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` ✅ built & pushed | `make build-leios` (~1–2h source compile) | + Guild tooling, healthcheck, entrypoint | You want full platform consistency |
 
 > The **`leiosT1` / `leiosT2` / `leiosT3`** relays and **`leios-volcy` / `leios-silem`** BPs run
-> **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` with the shared entrypoint.
-> Fleet nodes pin git `3cc6340a` (prototype-2026w27) for chain-db compatibility with the IOG prebuilt binary.
-> One-shot CLI pods can use a HEAD build (`7c357a55`) for Dijkstra cert/tx work.
+> **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` (also tagged `leios-prototype-2026w32`) with the shared entrypoint.
+> Fleet pin: `LEIOS_RELEASE_TAG` / `NODE_BUILD_REF` in [`versions.env`](versions.env) (currently `prototype-2026w32` / `c5f7d912…`).
 
 ### Option A — Prebuilt IOG relay (deployed as `leiosT1`)
 
@@ -209,9 +208,10 @@ The Musashi prototype can crash on **cold start** with:
 `Issue #890 gate missed … cert: LeiosCert`
 
 This is a **ledger replay** bug in the prototype consensus layer. Historically this was
-**not** fixed by rebuilding the image; **prototype-2026w27** (git pin `3cc6340a`) is the
-first build to address the #890 class directly (relative `LeiosDbConfig` path + staging-area
-replacement), so keep the fleet on that pin.
+**not** fixed by rebuilding the image; **prototype-2026w27** (git pin `3cc6340a`) first
+addressed the #890 class (relative `LeiosDbConfig` path + staging-area replacement).
+Stay on the current fleet pin in [`versions.env`](versions.env) (`prototype-2026w32`+);
+still prefer no casual BP restarts when EB history may be missing.
 
 **Root cause.** On this testnet a fresh sync eventually reaches a region where the
 public network no longer serves the historical **endorser-block (EB) bodies**. The
