@@ -4,8 +4,8 @@
 
 | Component | Cardano | ApexFusion | Notes |
 |-----------|---------|------------|-------|
-| cardano-node | 11.0.1 | 10.1.4 | Source-built from IntersectMBO |
-| cardano-cli | 11.0.0.0 | 9.4.1.0 | CLI version must match node era |
+| cardano-node | 11.1.1 | 10.1.4 | Source-built from IntersectMBO |
+| cardano-cli | 11.2.3.0 | 9.4.1.0 | CLI version must match node era |
 | GHC | 9.6.7 | 9.6.6 | Haskell compiler |
 | Cabal | 3.12.1.0 | 3.12.1.0 | Build tool |
 | Mithril client | 0.13.9 | — | Not available for ApexFusion |

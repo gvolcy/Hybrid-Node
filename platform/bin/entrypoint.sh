@@ -393,17 +393,31 @@ customise_configs() {
         trace_dispatcher=$(jq -r 'if .UseTraceDispatcher == true then "true" elif .UseTraceDispatcher == false then "false" else "missing" end' "${main_config}" 2>/dev/null)
         local has_legacy_traces
         has_legacy_traces=$(jq -r 'if has("TraceMempool") then "yes" else "no" end' "${main_config}" 2>/dev/null)
+        local node_ver
+        node_ver=$(cardano-node version 2>/dev/null | awk '/^cardano-node / {print $2; exit}')
+        local keep_new_trace=false
+        case "${node_ver}" in
+            11.1*|11.2*|11.3*|12.*) keep_new_trace=true ;;
+        esac
         if [ "${NETWORK}" = "leios" ]; then
-            # Leios prototype-2026w27+ (node 11.1.0) REQUIRES the new trace-dispatcher
-            # config (TraceOptions). Converting to legacy scribes makes the node abort at
-            # startup with AesonException "key \"Options\" not found". Keep the pristine
-            # new-tracing config from book.play; its TraceOptions already exposes Prometheus
-            # on 12798, so Guild/gLiveView metrics still work.
-            log "Leios: keeping new trace-dispatcher config (TraceOptions) — required by node 11.1.0"
+            keep_new_trace=true
+        fi
+
+        if [ "${keep_new_trace}" = "true" ]; then
+            # Node 11.1+ and Leios only ship the new trace dispatcher. Forcing
+            # UseTraceDispatcher=false / legacy Trace* keys aborts at startup.
+            log "Keeping new trace-dispatcher config (required by node ${node_ver:-11.1+})"
+            if [ "${trace_dispatcher}" = "false" ] || [ "${has_legacy_traces}" = "yes" ]; then
+                log "Replacing leftover legacy tracing with official ${NETWORK} TraceOptions..."
+                curl -sS -o "${main_config}" "${BASE_URL}/config.json"
+            fi
         elif [ "${trace_dispatcher}" = "true" ] || [ "${trace_dispatcher}" = "missing" ] || [ "${has_legacy_traces}" = "no" ]; then
             log "Configuring full legacy tracing (UseTraceDispatcher=false) for Guild tools compatibility"
             jq --argjson prom_p "${PROMETHEUS_PORT}" --argjson ekg_p "${EKG_PORT:-12788}" '
               .UseTraceDispatcher = false |
+              .TurnOnLogging = true |
+              .TurnOnLogMetrics = true |
+              .LogMetrics = true |
               del(.TraceOptions, .TraceOptionForwarder, .TraceOptionMetricsPrefix,
                   .TraceOptionResourceFrequency, .TraceOptionNodeName) |
               .defaultScribes = [["StdoutSK","stdout"]] |
