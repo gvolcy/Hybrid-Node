@@ -7,7 +7,7 @@
 # ============================================================================
 
 # ----- Build Arguments -----
-ARG NODE_VERSION=11.0.1
+ARG NODE_VERSION=11.1.1
 ARG GHC_VERSION=9.6.7
 ARG CABAL_VERSION=3.12.1.0
 ARG HASKELL_IMAGE_TAG=9.6.7-3.12.1.0-3
@@ -185,7 +185,7 @@ RUN bash -c 'networks=(guild mainnet preprod preview); \
     done' && chown -R guild:guild /opt/cardano
 
 # Download cardano-cli
-ARG CLI_VERSION=11.0.0.0
+ARG CLI_VERSION=11.2.3.0
 RUN ARCH=$(uname -m | sed 's/aarch64/aarch64/;s/x86_64/x86_64/') && \
     curl -sL "https://github.com/IntersectMBO/cardano-cli/releases/download/cardano-cli-${CLI_VERSION}/cardano-cli-${CLI_VERSION}-${ARCH}-linux.tar.gz" \
       | tar xz -C /tmp && \

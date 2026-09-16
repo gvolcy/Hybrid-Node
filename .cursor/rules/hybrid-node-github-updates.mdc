@@ -1,0 +1,15 @@
+---
+description: Always update Hybrid-Node from GitHub, never a local overlay
+alwaysApply: true
+---
+
+# Hybrid-Node updates come from GitHub
+
+When updating cardano-node, CLI, Mithril, or this image:
+
+1. `git fetch origin` and work from current `origin/main`.
+2. Pin upstream versions in `chains/<chain>/versions.env` from the official GitHub release (IntersectMBO / IOG), then match `platform/docker/Dockerfile.<chain>` ARGs and `.github/workflows/build.yml` defaults.
+3. Publish via GitHub Actions `Build` → `ghcr.io/gvolcy/hybrid-node:<chain>-<version>`. Deploy that GHCR tag.
+4. Do not treat a local binary overlay (`Dockerfile.*-overlay`, `docker save | ssh … ctr import`) as the fleet image.
+5. Keep `platform/bin/entrypoint.sh` compatible with the pin. Node 11.1+ and Leios must keep new `TraceOptions` tracing; forcing `UseTraceDispatcher=false` aborts startup.
+6. Relays first. Do not restart BPs around leader slots. Do not install Mithril signer versions that the target network does not support.
