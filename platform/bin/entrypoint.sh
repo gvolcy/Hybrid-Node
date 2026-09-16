@@ -729,8 +729,20 @@ setup_network_configs() {
         log "Using custom config: ${CONFIG}"
         cp "${CONFIG}" "${CONFIG_DIR}/config.json"
     elif [ -f "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" ]; then
-        log "Using hybrid config override for ${NETWORK}"
-        cp "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" "${CONFIG_DIR}/config.json"
+        local node_ver_cfg
+        node_ver_cfg=$(cardano-node version 2>/dev/null | awk '/^cardano-node / {print $2; exit}')
+        case "${node_ver_cfg}" in
+            11.1*|11.2*|11.3*|12.*)
+                # HostPath / image hybrid overrides are often leftover 11.0 legacy
+                # configs. 11.1+ aborts without official TraceOptions.
+                log "Skipping hybrid config override on node ${node_ver_cfg} (official ${NETWORK} TraceOptions required)"
+                curl -sS -o "${CONFIG_DIR}/config.json" "${BASE_URL}/config.json"
+                ;;
+            *)
+                log "Using hybrid config override for ${NETWORK}"
+                cp "${HYBRID_CONFIG_DIR}/${NETWORK}/config.json" "${CONFIG_DIR}/config.json"
+                ;;
+        esac
     elif [ -f "${CONFIG_DIR}/config.json" ]; then
         # Detect network mismatch: mainnet/afpm uses RequiresNoMagic, testnets use RequiresMagic
         local existing_magic
