@@ -7,7 +7,7 @@
 # ============================================================================
 
 # ----- Build Arguments -----
-ARG NODE_VERSION=11.1.1
+ARG NODE_VERSION=11.1.2
 ARG GHC_VERSION=9.6.7
 ARG CABAL_VERSION=3.12.1.0
 ARG HASKELL_IMAGE_TAG=9.6.7-3.12.1.0-3
@@ -50,11 +50,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # --- Mithril (IOG .deb packages from stable release) ---
-# Distribution 2630.0 — mithril-signer 1.1.6 (mainnet-compatible)
-ARG MITHRIL_RELEASE=2630.0
+# Distribution 2630.1-hotfix — mithril-signer 1.1.9 (fixes 2630.0 chain fetch bug)
+ARG MITHRIL_RELEASE=2630.1-hotfix
 ARG MITHRIL_CLIENT_VERSION=0.13.20
-ARG MITHRIL_SIGNER_VERSION=1.1.6
-ARG MITHRIL_BUILD_HASH=23e124d
+ARG MITHRIL_SIGNER_VERSION=1.1.9
+ARG MITHRIL_BUILD_HASH=3f6cb73
 
 RUN ARCH="${TARGETARCH}" && \
     echo "Installing mithril-client ${MITHRIL_CLIENT_VERSION} (${ARCH})..." && \

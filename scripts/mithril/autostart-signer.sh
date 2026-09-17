@@ -19,8 +19,8 @@ PID_FILE="$MITHRIL_DIR/mithril-signer.pid"
 CARDANO_SOCKET="/opt/cardano/cnode/sockets/node.socket"
 
 # Stable signer version — update these when upgrading
-MITHRIL_TAG="23e124d"
-MITHRIL_RELEASE="2630.0"
+MITHRIL_TAG="3f6cb73"
+MITHRIL_RELEASE="2630.1-hotfix"
 MITHRIL_URL="https://github.com/input-output-hk/mithril/releases/download/${MITHRIL_RELEASE}/mithril-${MITHRIL_RELEASE}-linux-x64.tar.gz"
 
 log() {
