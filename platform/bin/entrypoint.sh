@@ -316,22 +316,14 @@ customise_configs() {
                 mv "${main_config}.tmp" "${main_config}"
         fi
 
-        # Leios: persist the EB-closure store (leios.db) inside the DB volume.
-        # The upstream config ships LeiosDbConfig.Filepath="leios.db" (a RELATIVE
-        # path), which the node resolves against its working directory
-        # (${CNODE_HOME}), placing the multi-GB EB-closure store OUTSIDE the
-        # persisted ${DB_DIR} mount. On any restart the store is lost, so
-        # immutable-DB replay cannot resolve CertRBs (endorser-block closures) and
-        # the node aborts with the "#890 gate missed" error. Pin it to an absolute
-        # path inside ${DB_DIR} so it survives restarts and travels with db backups
-        # and relay→BP reseeds. No-op for non-Leios chains (no LeiosDbConfig).
-        local leios_db_path
-        leios_db_path=$(jq -r '.LeiosDbConfig.Filepath // empty' "${main_config}" 2>/dev/null)
-        if [ -n "${leios_db_path}" ] && [ "${leios_db_path}" != "${DB_DIR}/leios.db" ]; then
-            log "Leios: pinning LeiosDbConfig.Filepath -> ${DB_DIR}/leios.db (persist EB-closure store across restarts)"
-            jq --arg p "${DB_DIR}/leios.db" '.LeiosDbConfig.Filepath = $p' \
-                "${main_config}" > "${main_config}.tmp" && \
-                mv "${main_config}.tmp" "${main_config}"
+        # Leios w38+: LeiosDbConfig Filepath / VolatileFilepath / ImmutableFilepath
+        # are ignored. Partitions follow the node's own database paths the way
+        # VolatileDB / ImmutableDB do: leios.vol.db next to volatile/,
+        # leios.imm.db next to immutable/. With a single --database-path both
+        # sit in ${DB_DIR}. Do not pin Filepath — it is a no-op and would hide
+        # that the old leios.db name is gone.
+        if [ "${NETWORK}" = "leios" ]; then
+            log "Leios: EB store is ${DB_DIR}/leios.vol.db + ${DB_DIR}/leios.imm.db (w38+; Filepath config ignored)"
         fi
 
         # BP nodes: Switch GenesisMode → PraosMode
@@ -515,6 +507,10 @@ customise_configs() {
     # and `$(( ... + _value ))` aborts, crashing "Show wallet" for any wallet
     # holding native tokens. Re-parse the response as JSON via jq instead.
     patch_cntools_koios_balance
+
+    # Leios BPs: show the host-side vote tally (leios-vote-summary writes
+    # logs/leios-votes.state) as a panel under BLOCK PRODUCTION.
+    patch_glv_leios_votes
 }
 
 # Ensure manually-created wallets are visible to CNTools (base.addr, reward.addr).
@@ -606,6 +602,73 @@ PATCH_EOF
     else
         rm -f "${lib}.new"
         log "WARN: CNTools getBalanceKoios patch skipped (splice/syntax check failed)"
+    fi
+    rm -f "${patch_file}"
+}
+
+# Add a LEIOS VOTES panel to gLiveView, fed by ${CNODE_HOME}/logs/leios-votes.state.
+# The node exports no vote metrics; the state file is written from the host by
+# chains/leios/bin/leios-vote-summary. The panel only renders when the file exists.
+patch_glv_leios_votes() {
+    local glv="${CNODE_HOME}/scripts/gLiveView.sh"
+    [ -f "${glv}" ] || return 0
+    grep -q 'HYBRIDNODE_LEIOS_VOTES_PATCH' "${glv}" 2>/dev/null && return 0
+    grep -q '^    if \[\[ "${MITHRIL_SIGNER_ENABLED}" == "Y" \]\]; then' "${glv}" 2>/dev/null || return 0
+
+    local patch_file="/tmp/.glv-leios-votes.patch"
+    cat > "${patch_file}" <<'PATCH_EOF'
+    # HYBRIDNODE_LEIOS_VOTES_PATCH
+    if [[ -f "${CNODE_HOME}/logs/leios-votes.state" ]]; then
+      lv_voted=0; lv_not_voted=0; lv_too_late=0; lv_tip_not_announce=0; lv_coverage=0; lv_updated=0; lv_last_vote=0
+      while IFS='=' read -r lv_k lv_v; do
+        case ${lv_k} in voted|not_voted|too_late|tip_not_announce|coverage|updated|last_vote) [[ ${lv_v} =~ ^[0-9]+$ ]] && printf -v "lv_${lv_k}" '%s' "${lv_v}" ;; esac
+      done < "${CNODE_HOME}/logs/leios-votes.state"
+      lv_now=$(printf '%(%s)T' -1)
+      lv_total=$(( lv_voted + lv_not_voted ))
+      [[ ${lv_total} -gt 0 ]] && lv_rate=$(( lv_voted * 100 / lv_total )) || lv_rate=0
+      if   [[ ${lv_total} -eq 0 ]]; then lv_rate_fmt="${style_values_1}"
+      elif [[ ${lv_rate} -ge 90 ]]; then lv_rate_fmt="${style_status_1}"
+      elif [[ ${lv_rate} -ge 75 ]]; then lv_rate_fmt="${style_status_2}"
+      else lv_rate_fmt="${style_status_3}"; fi
+      if [[ ${lv_last_vote} -gt 0 ]]; then
+        lv_age=$(( lv_now - lv_last_vote ))
+        if   [[ ${lv_age} -lt 3600 ]]; then lv_last="$(( lv_age / 60 ))m ago"
+        elif [[ ${lv_age} -lt 86400 ]]; then lv_last="$(( lv_age / 3600 ))h ago"
+        else lv_last="$(( lv_age / 86400 ))d ago"; fi
+      else lv_last="-"; fi
+      [[ $(( lv_now - lv_updated )) -gt 900 ]] && lv_last_fmt="${style_status_3}" lv_last="stale" || lv_last_fmt="${style_values_1}"
+      printf "${VL}- ${style_info}LEIOS VOTES (24h)${NC} " && printf "%0.s-" $(seq $((width-21))) && closeRow
+      printf "${VL} Voted      : ${style_values_1}%-${three_col_value_width}s${NC}" "${lv_voted}"
+      mvThreeSecond
+      printf "Not voted  : ${style_values_1}%-${three_col_value_width}s${NC}" "${lv_not_voted}"
+      mvThreeThird
+      printf "Vote rate  : ${lv_rate_fmt}%-${three_col_value_width}s${NC}" "${lv_rate}%"
+      closeRow
+      printf "${VL} Too late   : ${style_values_1}%-${three_col_value_width}s${NC}" "${lv_too_late}"
+      mvThreeSecond
+      printf "No tip ann : ${style_values_1}%-${three_col_value_width}s${NC}" "${lv_tip_not_announce}"
+      mvThreeThird
+      printf "Last vote  : ${lv_last_fmt}%-${three_col_value_width}s${NC}" "${lv_last}"
+      closeRow
+      if [[ ${lv_coverage} -lt 95 ]]; then
+        printf "${VL} ${style_info}%s${NC}" "Tally covers ${lv_coverage}% of the last 24h (counter started or was down)"
+        closeRow
+      fi
+    fi
+PATCH_EOF
+
+    cp -a "${glv}" "${glv}.bak-leiosvotes" 2>/dev/null || true
+    if awk -v fn="${patch_file}" '
+        BEGIN { while ((getline line < fn) > 0) repl = repl line "\n" }
+        /^    if \[\[ "\$\{MITHRIL_SIGNER_ENABLED\}" == "Y" \]\]; then/ && !done { printf "%s", repl; done=1 }
+        { print }
+    ' "${glv}" > "${glv}.new" 2>/dev/null && bash -n "${glv}.new" 2>/dev/null; then
+        chmod --reference="${glv}" "${glv}.new" 2>/dev/null || chmod 755 "${glv}.new"
+        mv "${glv}.new" "${glv}"
+        log "Patched gLiveView (LEIOS VOTES panel)"
+    else
+        rm -f "${glv}.new"
+        log "WARN: gLiveView Leios votes patch skipped (splice/syntax check failed)"
     fi
     rm -f "${patch_file}"
 }

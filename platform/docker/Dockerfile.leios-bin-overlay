@@ -1,16 +1,17 @@
 # Overlay IOG prototype release binaries onto an existing Hybrid-Node Leios image.
-# Keeps entrypoint / Guild / healthcheck; swaps cardano-node + cardano-cli only.
+# Keeps Guild / healthcheck; swaps cardano-node + cardano-cli and the entrypoint
+# (w38+ LeiosDb partitions follow --database-path; Filepath is ignored).
 # Usage:
 #   docker build -f platform/docker/Dockerfile.leios-bin-overlay \
-#     --build-arg BASE_IMAGE=ghcr.io/gvolcy/hybrid-node:leios-0c585c9 \
-#     --build-arg BIN_DIR=/path/to/extracted/bin \
-#     -t ghcr.io/gvolcy/hybrid-node:leios-prototype-2026w34 .
-ARG BASE_IMAGE=ghcr.io/gvolcy/hybrid-node:leios-0c585c9
+#     --build-arg BASE_IMAGE=ghcr.io/gvolcy/hybrid-node:leios-prototype-2026w36 \
+#     -t ghcr.io/gvolcy/hybrid-node:leios-prototype-2026w39 .
+ARG BASE_IMAGE=ghcr.io/gvolcy/hybrid-node:leios-prototype-2026w36
 FROM ${BASE_IMAGE}
 USER root
 COPY bin/cardano-node /usr/local/bin/cardano-node
 COPY bin/cardano-cli  /usr/local/bin/cardano-cli
-RUN chmod 755 /usr/local/bin/cardano-node /usr/local/bin/cardano-cli \
+COPY platform/bin/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/cardano-node /usr/local/bin/cardano-cli /usr/local/bin/entrypoint.sh \
  && cardano-node --version \
  && cardano-cli --version
 USER 1000

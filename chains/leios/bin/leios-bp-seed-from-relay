@@ -80,16 +80,13 @@ $SSH "$BP_HOST" "TS=\$(date -u +%Y%m%dT%H%M%SZ); K='sudo k3s kubectl'; set -e
   \$K -n '$NS' set env deployment/'$POOL' NODE_MODE=bp START_AS_NON_PRODUCING=true TOPOLOGY=/opt/cardano/cnode/files/topology.json >/dev/null
   echo '  env set: NODE_MODE=bp START_AS_NON_PRODUCING=true TOPOLOGY pinned, CUSTOM_PEERS removed'"
 
-echo "--- [2/4] seed chain db from relay (immutable + ledger + protocolMagicId + leios.db) ---"
-# Include the Leios EB-closure store (leios.db + WAL/SHM) when the relay persists
-# it inside its db dir. Without those closures, immutable-DB replay cannot resolve
-# CertRBs and the BP crashes with "#890 gate missed". The files are optional: older
-# builds (and any node still writing leios.db to its CWD instead of the DB volume)
-# won't have them here — in that case the copy is skipped with a NOTE, and the reseed
-# falls back to the fragile cert-free-window timing behaviour. Redeploy the relay with
-# the LeiosDbConfig.Filepath persistence fix (entrypoint) to make reseeds deterministic.
-$SSH "$RELAY_HOST" "cd '$RELAY_DB' && set -- immutable ledger protocolMagicId; for f in leios.db leios.db-wal leios.db-shm; do [ -e \"\$f\" ] && set -- \"\$@\" \"\$f\"; done; sudo tar -cf - \"\$@\" 2>/dev/null" \
-  | $SSH "$BP_HOST" "sudo tar -C '$DB' -xf - && sudo chown -R 1000:1000 '$DB' && echo '  seeded:' && sudo ls '$DB'/ledger/ && { sudo test -e '$DB'/leios.db && echo '  + leios.db EB-closure store copied (deterministic replay)' || echo '  NOTE: relay has no persisted leios.db — reseed relies on a cert-free replay window (redeploy relay with the LeiosDbConfig fix for deterministic reseeds)'; }"
+echo "--- [2/4] seed chain db from relay (immutable + ledger + protocolMagicId + leios.{vol,imm}.db) ---"
+# w38+: EB store is two partitions next to volatile/ and immutable/. Copy both
+# (plus WAL/SHM) so immutable-DB replay can resolve CertRBs. Older relays may
+# still have a single leios.db — copy that too if present, but w38 will not
+# pick it up (needs a wipe + sideload of the split files).
+$SSH "$RELAY_HOST" "cd '$RELAY_DB' && set -- immutable ledger protocolMagicId; for f in leios.vol.db leios.vol.db-wal leios.vol.db-shm leios.imm.db leios.imm.db-wal leios.imm.db-shm leios.db leios.db-wal leios.db-shm; do [ -e \"\$f\" ] && set -- \"\$@\" \"\$f\"; done; sudo tar -cf - \"\$@\" 2>/dev/null" \
+  | $SSH "$BP_HOST" "sudo tar -C '$DB' -xf - && sudo chown -R 1000:1000 '$DB' && echo '  seeded:' && sudo ls '$DB'/ledger/ && { sudo test -e '$DB'/leios.imm.db && echo '  + leios.imm.db + leios.vol.db copied (w38 split store)' || { sudo test -e '$DB'/leios.db && echo '  NOTE: copied legacy leios.db — w38 ignores it, reseed from a w38 relay' || echo '  NOTE: relay has no persisted LeiosDb'; }; }"
 
 echo "--- [3/4] start BP ---"
 $SSH "$BP_HOST" "sudo k3s kubectl -n '$NS' scale deployment/'$POOL' --replicas=1"

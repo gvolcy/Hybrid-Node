@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# ============================================================================
+# leios-vote-summary — Leios vote stats for block producers running in k3s.
+#
+# Adapted from a community journalctl script. In k3s the node's log only lives
+# in the kubelet pod log files, which rotate at 10 MiB (every ~5-7 minutes on a
+# Leios BP) and keep ~35 minutes. So count every 5 minutes into slots.csv, one
+# row per closed 5-minute slot, and build the daily summary from those rows.
+# All times are UTC, matching the node's log timestamps.
+# Each tick also writes rolling 24h totals to the pod's logs mount
+# (leios-votes.state) for the gLiveView LEIOS VOTES panel.
+#
+# Usage (as root on the BP host):
+#   leios-vote-summary tick                   record closed 5-minute slots
+#   leios-vote-summary daily [YYYY-MM-DD]     print + append one day's summary
+#   leios-vote-summary daily-auto             write yesterday's summary once
+#
+# Cron:
+#   */5 * * * * root /usr/local/bin/leios-vote-summary tick       >> /var/log/leios-votes/cron.log 2>&1
+#   12  * * * * root /usr/local/bin/leios-vote-summary daily-auto >> /var/log/leios-votes/cron.log 2>&1
+# ============================================================================
+set -euo pipefail
+
+NODES="${LEIOS_BPS:-leios-volcy leios-silem}"
+PODLOGS="${POD_LOG_DIR:-/var/log/pods}"
+DIR="${LEIOS_VOTE_DIR:-/var/log/leios-votes}"
+SLOTS="$DIR/slots.csv"
+DAILY="$DIR/daily.log"
+STATE_PATH="${LEIOS_STATE_PATH:-/data/leios/%s/data/logs/leios-votes.state}"
+SLOT_SEC=300
+
+mkdir -p "$DIR"
+[ -f "$SLOTS" ] || echo "slot_utc,node,voted,not_voted,too_late,tip_not_announce,other" > "$SLOTS"
+
+slot_key() { date -u -d "@$1" +%Y-%m-%dT%H:%M; }
+
+tick_node() {
+  local ns="$1" files counts first_epoch start end now s key row
+  files=$(ls "$PODLOGS"/"${ns}"_"${ns}"-*/cardano-node/*.log* 2>/dev/null || true)
+  [ -n "$files" ] || { echo "$(date -u +%FT%TZ) $ns: no pod log files" >&2; return 0; }
+
+  # One pass over all rotated files: per-slot counts, plus the oldest event time.
+  # shellcheck disable=SC2086
+  counts=$(zcat -f $files 2>/dev/null | awk '
+    match($0, /"at":"[0-9-]+T[0-9:]+/) {
+      ts = substr($0, RSTART + 6, 19)
+      if (min == "" || ts < min) min = ts
+      if ($0 !~ /"kind":"Leios(Not)?Voted"/) next
+      b = sprintf("%s%02d", substr(ts, 1, 14), int(substr(ts, 15, 2) / 5) * 5)
+      if (/"kind":"LeiosVoted"/) { v[b]++; seen[b] = 1; if (ts > last) last = ts; next }
+      n[b]++; seen[b] = 1
+      if      (/"reason":"tooLate"/)                 t[b]++
+      else if (/"reason":"chainTipDoesNotAnnounce"/) c[b]++
+      else                                           o[b]++
+    }
+    END {
+      print "MIN", min
+      print "LAST", last
+      for (b in seen) printf "%s %d %d %d %d %d\n", b, v[b], n[b], t[b], c[b], o[b]
+    }')
+  first_epoch=$(awk '$1 == "MIN" { print $2 }' <<<"$counts")
+  [ -n "$first_epoch" ] || return 0
+  first_epoch=$(date -u -d "${first_epoch}Z" +%s)
+
+  # Skip the oldest slot (its start may have rotated away) and the open slot.
+  start=$(( (first_epoch / SLOT_SEC + 1) * SLOT_SEC ))
+  now=$(date -u +%s)
+  end=$(( now / SLOT_SEC * SLOT_SEC ))
+  for (( s = start; s < end; s += SLOT_SEC )); do
+    key=$(slot_key "$s")
+    grep -q "^${key},${ns}," "$SLOTS" && continue
+    row=$(awk -v b="$key" '$1 == b { printf "%d,%d,%d,%d,%d", $2, $3, $4, $5, $6; f = 1 }
+                         END { if (!f) printf "0,0,0,0,0" }' <<<"$counts")
+    echo "${key},${ns},${row}" >> "$SLOTS"
+  done
+
+  write_state "$ns" "$(awk '$1 == "LAST" { print $2 }' <<<"$counts")"
+}
+
+# Rolling 24h totals for gLiveView, written into the pod's logs mount.
+write_state() {
+  local ns="$1" last_ts="$2" state since last_vote tmp
+  # shellcheck disable=SC2059
+  state=$(printf "$STATE_PATH" "$ns")
+  [ -d "$(dirname "$state")" ] || return 0
+  since=$(slot_key $(( $(date -u +%s) - 86400 )))
+  last_vote=0
+  [ -n "$last_ts" ] && last_vote=$(date -u -d "${last_ts}Z" +%s)
+  if [ "$last_vote" -eq 0 ] && [ -f "$state" ]; then
+    last_vote=$(awk -F= '$1 == "last_vote" { print $2 }' "$state")
+  fi
+  tmp="${state}.tmp"
+  awk -F, -v s="$since" -v f="$ns" -v lv="${last_vote:-0}" -v now="$(date -u +%s)" '
+    NR > 1 && $2 == f && $1 >= s { k++; v += $3; n += $4; t += $5; c += $6; o += $7 }
+    END {
+      cov = int(k * 100 / 288); if (cov > 100) cov = 100
+      printf "voted=%d\nnot_voted=%d\ntoo_late=%d\ntip_not_announce=%d\nother=%d\n", v, n, t, c, o
+      printf "coverage=%d\nlast_vote=%d\nupdated=%d\n", cov, lv, now
+    }' "$SLOTS" > "$tmp"
+  chmod 644 "$tmp"
+  mv "$tmp" "$state"
+}
+
+pct() { if [ "$2" -gt 0 ]; then echo $(( ($1 * 100 + $2 / 2) / $2 )); else echo 0; fi; }
+
+summarise() {
+  local label="$1" day="$2" filter="$3" slots v n t c o total cover
+  read -r slots v n t c o < <(awk -F, -v d="$day" -v f="$filter" '
+    NR > 1 && index($1, d "T") == 1 && (f == "" || $2 == f) {
+      if (!($1 in s)) { s[$1] = 1; k++ }
+      v += $3; n += $4; t += $5; c += $6; o += $7 }
+    END { printf "%d %d %d %d %d %d\n", k, v, n, t, c, o }' "$SLOTS")
+  total=$(( v + n ))
+  cover=$(( slots * 100 / 288 ))
+  printf '%-30s %s\n' "Node:" "$label"
+  printf '%-30s %5d    (%d%% of the day covered)\n' "Total vote events:" "$total" "$cover"
+  printf '%-30s %5d    (%3d%%)\n' "Voted:" "$v" "$(pct "$v" "$total")"
+  printf '%-30s %5d    (%3d%%)\n' "Not voted:" "$n" "$(pct "$n" "$total")"
+  printf '%-30s %5d    (%3d%%)\n' "  - tooLate:" "$t" "$(pct "$t" "$total")"
+  printf '%-30s %5d    (%3d%%)\n' "  - chainTipDoesNotAnnounce:" "$c" "$(pct "$c" "$total")"
+  printf '%-30s %5d    (%3d%%)\n' "  - other reason:" "$o" "$(pct "$o" "$total")"
+}
+
+daily() {
+  local day="$1" line ns
+  line=$(printf '%*s' 56 '' | tr ' ' '=')
+  {
+    echo "$line"
+    echo "Leios vote summary  ${day} (UTC, 00:00 to 24:00)"
+    echo "$line"
+    for ns in $NODES; do summarise "$ns" "$day" "$ns"; echo; done
+    summarise "all BPs" "$day" ""
+    echo "$line"
+    echo
+  } | tee -a "$DAILY"
+}
+
+case "${1:-}" in
+  tick)
+    for ns in $NODES; do tick_node "$ns"; done ;;
+  daily)
+    daily "${2:-$(date -u -d yesterday +%F)}" ;;
+  daily-auto)
+    day=$(date -u -d yesterday +%F)
+    if ! grep -q "summary  ${day} " "$DAILY" 2>/dev/null && grep -q "^${day}T23:55," "$SLOTS"; then
+      daily "$day" >/dev/null
+    fi ;;
+  *)
+    sed -n '2,21p' "$0"; exit 1 ;;
+esac
