@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# ============================================================================
+# leios-mem-guard — restart a Leios RELAY before it is OOM-killed.
+#
+# WHY: prototype-2026w39 cardano-node retains memory at steady state
+# (input-output-hk/ouroboros-leios#1120). A graceful restart drops it back to
+# ~0.6 GiB and the node resumes from its DB with no resync. An OOM kill is an
+# unclean shutdown, so restart first.
+#
+# Relays only. Never point this at a block producer: a BP restart must avoid
+# leader slots and needs a manual SIGHUP to resume forging.
+#
+# Usage (cron, as root, one entry per relay host, staggered minutes):
+#   leios-mem-guard <namespace> [threshold_pct=80] [min_age_minutes=60]
+# ============================================================================
+set -euo pipefail
+
+NS="${1:?usage: leios-mem-guard <namespace> [threshold_pct] [min_age_minutes]}"
+THRESH="${2:-80}"
+MIN_AGE_MIN="${3:-60}"
+K="${KUBECTL:-k3s kubectl}"
+log() { echo "$(date -u +%FT%TZ) $NS $*"; }
+
+case "$NS" in
+  leios-volcy|leios-silem) log "refusing: $NS is a block producer"; exit 1 ;;
+esac
+
+if [ "$($K -n "$NS" get deploy "$NS" -o jsonpath='{.metadata.labels.role}')" = "bp" ]; then
+  log "refusing: deployment is labelled role=bp"; exit 1
+fi
+
+POD=$($K -n "$NS" get pod -l app="$NS" --field-selector=status.phase=Running \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+[ -n "$POD" ] || { log "no running pod"; exit 0; }
+
+to_mi() {
+  case "$1" in
+    *Gi) echo $(( ${1%Gi} * 1024 )) ;;
+    *Mi) echo "${1%Mi}" ;;
+    *G)  echo $(( ${1%G} * 1000 * 1000 * 1000 / 1048576 )) ;;
+    *M)  echo $(( ${1%M} * 1000 * 1000 / 1048576 )) ;;
+    *)   echo $(( $1 / 1048576 )) ;;
+  esac
+}
+
+LIMIT=$($K -n "$NS" get deploy "$NS" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}')
+[ -n "$LIMIT" ] || { log "no memory limit set"; exit 0; }
+LIMIT_MI=$(to_mi "$LIMIT")
+MEM_MI=$($K -n "$NS" top pod "$POD" --no-headers 2>/dev/null | awk '{print $3}' | tr -d 'Mi')
+[ -n "$MEM_MI" ] || { log "metrics unavailable"; exit 0; }
+PCT=$(( MEM_MI * 100 / LIMIT_MI ))
+
+STARTED=$($K -n "$NS" get pod "$POD" -o jsonpath='{.status.startTime}')
+AGE_MIN=$(( ( $(date -u +%s) - $(date -u -d "$STARTED" +%s) ) / 60 ))
+
+if [ "$PCT" -lt "$THRESH" ]; then
+  log "ok ${MEM_MI}Mi/${LIMIT_MI}Mi (${PCT}%) age=${AGE_MIN}m"
+  exit 0
+fi
+if [ "$AGE_MIN" -lt "$MIN_AGE_MIN" ]; then
+  log "high ${PCT}% but pod only ${AGE_MIN}m old, skipping"
+  exit 0
+fi
+
+log "RESTART ${MEM_MI}Mi/${LIMIT_MI}Mi (${PCT}%) >= ${THRESH}% age=${AGE_MIN}m"
+$K -n "$NS" rollout restart deployment/"$NS"
+$K -n "$NS" rollout status deployment/"$NS" --timeout=900s
+log "restarted"
