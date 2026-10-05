@@ -875,6 +875,30 @@ add_custom_peers() {
         }')
         log "BP topology: set ${num_peers} exclusive relay peers (locked-down, no public roots)"
         echo "${topology_json}" > "${topology}"
+    elif { [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; } && \
+         jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
+        # ApexFusion relay mode: custom peers are our own BPs/relays, so they must be
+        # trustable (untrusted local roots can be dropped in favour of ledger peers).
+        # Strip these peers from existing groups first so restarts stay idempotent
+        # and legacy "valency"/untrusted groups get replaced.
+        jq --argjson peers "${peers_json}" '
+            ($peers | map("\(.address):\(.port)")) as $keys
+            | .localRoots |= map(
+                .accessPoints |= map(select(("\(.address):\(.port)" | IN($keys[])) | not))
+                | (.accessPoints | length) as $n
+                | if .hotValency then .hotValency = ([.hotValency, $n] | min) else . end
+                | if .warmValency then .warmValency = ([.warmValency, $n] | min) else . end
+                | if .valency then .valency = ([.valency, $n] | min) else . end)
+            | .localRoots |= map(select((.accessPoints | length) > 0))
+            | .localRoots += [{
+                "accessPoints": $peers,
+                "advertise": false,
+                "trustable": true,
+                "hotValency": ($peers | length),
+                "warmValency": ($peers | length)
+              }]' \
+            "${topology}" > "${topology}.tmp" && mv "${topology}.tmp" "${topology}"
+        log "Relay topology: set ${#PEER_LIST[@]} trustable custom peers"
     elif jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
         # Relay mode: append custom peers to existing topology
         # First check if custom peers are already present (avoid duplicates on restart)
