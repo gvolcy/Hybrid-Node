@@ -2,13 +2,16 @@
 # DMQ Node Setup & Autostart Script
 # Template: deploy to /opt/cardano/cnode/mithril/dmq-setup.sh in the pod
 # Downloads and configures DMQ node on ephemeral storage, then starts it
-# Called by autostart-signer-dmq.sh or manually
+# Called by autostart.sh / mithril-keeper or manually
 #
-# Configuration:
-#   - Update DMQ_VERSION when upgrading
-#   - Update DMQ topology peers as needed
-#   - Set --cardano-network-magic and --dmq-network-magic for your network
-#     Preview: cardano-magic=2, dmq-magic=2147483650
+# Production layout (matches Mithril signer docs):
+#   - Relay DMQ listens on the host (preview 6161, preprod 6162) and peers
+#     with the official bootstrap. Do not put bootstrap IPs in this BP script.
+#   - BP DMQ listens on 3141 inside the pod and peers only to our relay.
+#   - mithril-signer uses DMQ_NODE_SOCKET_PATH on the same BP.
+#
+# Preview: CARDANO_NETWORK_MAGIC=2  DMQ_NETWORK_MAGIC=2147483650  relay :6161
+# Preprod: CARDANO_NETWORK_MAGIC=1  DMQ_NETWORK_MAGIC=2147483649  relay :6162
 
 set -e
 
@@ -19,7 +22,7 @@ DMQ_TOPOLOGY="$DMQ_DIR/dmq.topology.json"
 DMQ_IPC_DIR="$DMQ_DIR/ipc"
 DMQ_LOG="$DMQ_DIR/dmq.log"
 DMQ_PID_FILE="$DMQ_DIR/dmq-node.pid"
-DMQ_VERSION="0.6.0.0"
+DMQ_VERSION="0.7.1.0"
 DMQ_DOWNLOAD_URL="https://github.com/IntersectMBO/dmq-node/releases/download/${DMQ_VERSION}/dmq-node-linux.tar.gz"
 CARDANO_SOCKET="/opt/cardano/cnode/sockets/node.socket"
 
@@ -73,7 +76,7 @@ fi
 # Write DMQ configuration (trace-dispatcher format)
 cat > "$DMQ_CONFIG" << DMQCFG
 {
-  "PeerSharing": true,
+  "PeerSharing": false,
   "LedgerPeers": false,
   "ShelleyGenesisFile": "${SHELLEY_GENESIS_FILE}",
   "TraceOptions": {
@@ -85,23 +88,29 @@ cat > "$DMQ_CONFIG" << DMQCFG
 }
 DMQCFG
 
-# Write DMQ topology — update peer addresses as needed
+# BP topology: only our preview1-relay DMQ (192.168.2.138:6161).
+# Preprod BPs must use 192.168.2.138:6162 instead.
 cat > "$DMQ_TOPOLOGY" << 'DMQTOPO'
 {
+  "bootstrapPeers": [],
   "localRoots": [
     {
       "accessPoints": [
         {
-          "address": "34.76.22.193",
-          "port": 6161
+          "address": "192.168.2.138",
+          "port": 6161,
+          "valency": 1
         }
       ],
       "advertise": false,
-      "valency": 1,
-      "trustable": true
+      "trustable": true,
+      "valency": 1
     }
   ],
-  "publicRoots": []
+  "peerSnapshotFile": null,
+  "publicRoots": [
+    { "accessPoints": [], "advertise": false }
+  ]
 }
 DMQTOPO
 
