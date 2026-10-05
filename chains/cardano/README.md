@@ -225,7 +225,8 @@ The latest upstream `cardano-node` releases from [IntersectMBO](https://github.c
 
 | Version | Date | Notes |
 |---------|------|-------|
-| **11.1.2** | Sep 2026 | Patch on 11.1.1: lower memory use in time-lock scripts. Same tracing/LedgerDB rules. Ships **cardano-cli 11.2.3.0**. **Currently pinned.** Relays first. |
+| **11.1.3** | Sep 2026 | Reverts the 11.1.2 Ledger IPv4 decoding change (network order again). Same tracing/LedgerDB rules. Ships **cardano-cli 11.2.3.0**. **Currently pinned.** Relays first. |
+| **11.1.2** | Sep 2026 | Patch on 11.1.1: lower memory use in time-lock scripts. Same tracing/LedgerDB rules. Ships **cardano-cli 11.2.3.0**. |
 | **11.1.1** | Sep 2026 | Drops **legacy tracing** (TraceOptions only). Removes V1 LedgerDB + LMDB. Mithril-comparable snapshots. Ships **cardano-cli 11.2.3.0**. |
 | **11.0.1** | May 2026 | First release supporting **PV11 intra-era hard fork** (governance vote required to enact). Advances experimental HF target to PV12. Adds **HTTPS for EKG/Prometheus** in `cardano-tracer`, new **cardano-rpc REST timeseries store**. Bumps `cardano-api` & `cardano-cli` to 11.0 series. No chain replay required. Known LSM-backend issues only affect users on `V2LSM` (we use the default backend). |
 | **10.7.1** | Apr 2026 | Mempool perf fixes, LSM-trees snapshot fixes, Plutus & tracing improvements. Adds `liburing`, `protobuf-compiler`, `snappy-c` deps on Linux. Last stable in 10.x series. |

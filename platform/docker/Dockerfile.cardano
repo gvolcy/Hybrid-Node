@@ -7,7 +7,7 @@
 # ============================================================================
 
 # ----- Build Arguments -----
-ARG NODE_VERSION=11.1.2
+ARG NODE_VERSION=11.1.3
 ARG GHC_VERSION=9.6.7
 ARG CABAL_VERSION=3.12.1.0
 ARG HASKELL_IMAGE_TAG=9.6.7-3.12.1.0-3
