@@ -875,9 +875,10 @@ add_custom_peers() {
         }')
         log "BP topology: set ${num_peers} exclusive relay peers (locked-down, no public roots)"
         echo "${topology_json}" > "${topology}"
-    elif jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
-        # Relay mode: custom peers are our own BPs/relays, so they must be trustable
-        # (untrusted local roots can be dropped in favour of ledger peers).
+    elif { [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; } && \
+         jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
+        # ApexFusion relay mode: custom peers are our own BPs/relays, so they must be
+        # trustable (untrusted local roots can be dropped in favour of ledger peers).
         # Strip these peers from existing groups first so restarts stay idempotent
         # and legacy "valency"/untrusted groups get replaced.
         jq --argjson peers "${peers_json}" '
@@ -898,6 +899,22 @@ add_custom_peers() {
               }]' \
             "${topology}" > "${topology}.tmp" && mv "${topology}.tmp" "${topology}"
         log "Relay topology: set ${#PEER_LIST[@]} trustable custom peers"
+    elif jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
+        # Relay mode: append custom peers to existing topology
+        # First check if custom peers are already present (avoid duplicates on restart)
+        local first_addr first_port
+        first_addr=$(echo "${peers_json}" | jq -r '.[0].address')
+        first_port=$(echo "${peers_json}" | jq -r '.[0].port')
+        if jq -e --arg a "${first_addr}" --argjson p "${first_port}" \
+            '[.localRoots[].accessPoints[] | select(.address == $a and .port == $p)] | length > 0' \
+            "${topology}" > /dev/null 2>&1; then
+            log "Custom peers already present in topology, skipping duplicate append"
+        else
+            jq --argjson peers "${peers_json}" \
+                '.localRoots += [{"accessPoints": $peers, "advertise": false, "trustable": false, "valency": ($peers | length)}]' \
+                "${topology}" > "${topology}.tmp" && mv "${topology}.tmp" "${topology}"
+            log "Added ${#PEER_LIST[@]} custom peers to P2P topology"
+        fi
     fi
 }
 
