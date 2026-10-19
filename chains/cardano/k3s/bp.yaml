@@ -556,19 +556,29 @@ spec:
                     exit 1
                   fi
 
-                  DB_SIZE=$(kubectl exec -n $NS $POD -- du -sh /opt/cardano/cnode/db 2>/dev/null | awk '{print $1}')
+                  DB_SIZE=$(kubectl exec -n $NS $POD -- du -sh /opt/cardano/cnode/db | awk '{print $1}')
                   echo "Current DB size: $DB_SIZE"
+                  OUT="${SNAPSHOT_DIR}/db-${DEPLOY}-${TIMESTAMP}.tar.gz"
+                  echo "Creating snapshot to $OUT ..."
 
-                  echo "Creating snapshot..."
-                  kubectl exec -n $NS $POD -- tar czf - /opt/cardano/cnode/db 2>/dev/null > ${SNAPSHOT_DIR}/db-${DEPLOY}-${TIMESTAMP}.tar.gz
+                  # Live ChainDB files change while tar runs; tar exit 1 is expected.
+                  set +e
+                  kubectl exec -n $NS $POD -- tar --warning=no-file-changed --ignore-failed-read -C /opt/cardano/cnode -czf - db > "$OUT"
+                  rc=$?
+                  set -e
 
-                  if [ $? -eq 0 ]; then
-                    SNAP_SIZE=$(du -sh ${SNAPSHOT_DIR}/db-${DEPLOY}-${TIMESTAMP}.tar.gz | awk '{print $1}')
-                    echo "Snapshot created: db-${DEPLOY}-${TIMESTAMP}.tar.gz ($SNAP_SIZE)"
-                  else
-                    echo "ERROR: Snapshot failed!"
+                  if [ ! -s "$OUT" ]; then
+                    echo "ERROR: Snapshot file missing or empty (tar rc=$rc)"
+                    rm -f "$OUT"
                     exit 1
                   fi
+                  if [ "$rc" -gt 1 ]; then
+                    echo "ERROR: tar failed with rc=$rc"
+                    rm -f "$OUT"
+                    exit 1
+                  fi
+                  SNAP_SIZE=$(du -sh "$OUT" | awk '{print $1}')
+                  echo "Snapshot created: $(basename "$OUT") ($SNAP_SIZE) tar_rc=$rc"
 
                   cd ${SNAPSHOT_DIR}
                   ls -t db-${DEPLOY}-*.tar.gz 2>/dev/null | tail -n +$((MAX_SNAPSHOTS + 1)) | xargs -r rm -v
