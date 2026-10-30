@@ -210,6 +210,14 @@ check_genesis_hashes() {
         return  # config not yet downloaded, will be checked later
     fi
 
+    # cardano-config envelope (node 11.2+): genesis hashes live under
+    # Configuration.Protocol / Configuration.Testing. Flat-key rewrites would
+    # corrupt the envelope; the node validates hashes itself.
+    if jq -e '.Version and .Configuration' "${config_file}" >/dev/null 2>&1; then
+        log "Envelope config detected (Version=$(jq -r .Version "${config_file}")) — skipping flat genesis hash rewrite"
+        return
+    fi
+
     if ! command -v cardano-cli &>/dev/null; then
         warn "cardano-cli not found, skipping genesis hash verification"
         return
@@ -296,6 +304,57 @@ check_genesis_hashes() {
     fi
 }
 
+
+# ----- Guild / gLiveView aliases for cardano-config envelopes (node 11.2+) -----
+# Guild env still reads flat .ConwayGenesisFile / .TraceOptions. Envelopes nest
+# those under Configuration.*; without top-level aliases gLiveView fails with
+# "Conway genesis file not found: .../null". The node uses cardano-config and
+# ignores these aliases when Version + Configuration are present.
+apply_guild_envelope_shim() {
+    local main_config="${CONFIG_DIR}/config.json"
+    if [ ! -f "${main_config}" ]; then
+        return
+    fi
+    if ! jq -e '.Version and .Configuration' "${main_config}" >/dev/null 2>&1; then
+        return
+    fi
+
+    log "Adding Guild-compatible top-level aliases for envelope config (gLiveView/env)"
+    if jq '
+        .Configuration.Protocol as $p
+        | .Configuration.Testing as $t
+        | .Configuration.Network as $n
+        | .Configuration.Consensus as $c
+        | .Configuration.HermodTracing as $h
+        | . + {
+            Protocol: "Cardano",
+            EnableP2P: true,
+            AlonzoGenesisFile: $p.AlonzoGenesisFile,
+            AlonzoGenesisHash: $p.AlonzoGenesisHash,
+            ByronGenesisFile: $p.ByronGenesisFile,
+            ByronGenesisHash: $p.ByronGenesisHash,
+            ShelleyGenesisFile: $p.ShelleyGenesisFile,
+            ShelleyGenesisHash: $p.ShelleyGenesisHash,
+            ConwayGenesisFile: $p.ConwayGenesisFile,
+            ConwayGenesisHash: $p.ConwayGenesisHash,
+            DijkstraGenesisFile: $t.DijkstraGenesisFile,
+            DijkstraGenesisHash: $t.DijkstraGenesisHash,
+            ExperimentalHardForksEnabled: $t.ExperimentalHardForksEnabled,
+            ExperimentalProtocolsEnabled: $n.ExperimentalProtocolsEnabled,
+            ConsensusMode: $c.ConsensusMode,
+            TraceOptions: $h.TraceOptions,
+            TraceOptionForwarder: $h.TraceOptionForwarder,
+            TraceOptionMetricsPrefix: $h.TraceOptionMetricsPrefix,
+            TraceOptionResourceFrequency: $h.TraceOptionResourceFrequency
+          }
+    ' "${main_config}" > "${main_config}.tmp" 2>/dev/null; then
+        mv "${main_config}.tmp" "${main_config}"
+    else
+        warn "Failed to apply Guild envelope shim"
+        rm -f "${main_config}.tmp"
+    fi
+}
+
 # ----- Customise Guild configs for monitoring access -----
 customise_configs() {
     log "Customising config files for external access..."
@@ -308,12 +367,17 @@ customise_configs() {
     # but Guild Operators gLiveView/env still reads it — defaults to false if missing)
     local main_config="${CONFIG_DIR}/config.json"
     if [ -f "${main_config}" ]; then
+        if jq -e '.Version and .Configuration' "${main_config}" >/dev/null 2>&1; then
+            log "Envelope config — leaving EnableP2P / TraceOptions under Configuration untouched"
+        else
         local has_p2p
         has_p2p=$(jq -r '.EnableP2P // empty' "${main_config}" 2>/dev/null)
         if [ -z "${has_p2p}" ]; then
             log "Adding EnableP2P=true to config.json (required for gLiveView P2P detection)"
             jq '. + {"EnableP2P": true}' "${main_config}" > "${main_config}.tmp" && \
                 mv "${main_config}.tmp" "${main_config}"
+        fi
+
         fi
 
         # Leios: persist the EB-closure store (leios.db) inside the DB volume.
@@ -342,11 +406,20 @@ customise_configs() {
         # (Valid values: GenesisMode, PraosMode — CardanoMode was removed in 10.x)
         if [ "${NODE_MODE}" = "bp" ]; then
             local current_mode
-            current_mode=$(jq -r '.ConsensusMode // empty' "${main_config}" 2>/dev/null)
-            if [ "${current_mode}" = "GenesisMode" ]; then
-                log "BP mode: Switching ConsensusMode from GenesisMode to PraosMode"
-                jq '.ConsensusMode = "PraosMode"' "${main_config}" > "${main_config}.tmp" && \
-                    mv "${main_config}.tmp" "${main_config}"
+            if jq -e '.Version and .Configuration' "${main_config}" >/dev/null 2>&1; then
+                current_mode=$(jq -r '.Configuration.Consensus.ConsensusMode // empty' "${main_config}" 2>/dev/null)
+                if [ "${current_mode}" = "GenesisMode" ]; then
+                    log "BP mode: Switching Configuration.Consensus.ConsensusMode from GenesisMode to PraosMode"
+                    jq '.Configuration.Consensus.ConsensusMode = "PraosMode"' "${main_config}" > "${main_config}.tmp" && \
+                        mv "${main_config}.tmp" "${main_config}"
+                fi
+            else
+                current_mode=$(jq -r '.ConsensusMode // empty' "${main_config}" 2>/dev/null)
+                if [ "${current_mode}" = "GenesisMode" ]; then
+                    log "BP mode: Switching ConsensusMode from GenesisMode to PraosMode"
+                    jq '.ConsensusMode = "PraosMode"' "${main_config}" > "${main_config}.tmp" && \
+                        mv "${main_config}.tmp" "${main_config}"
+                fi
             fi
         fi
 
@@ -399,7 +472,7 @@ customise_configs() {
         case "${node_ver}" in
             11.1*|11.2*|11.3*|12.*) keep_new_trace=true ;;
         esac
-        if [ "${NETWORK}" = "leios" ]; then
+        if [ "${NETWORK}" = "leios" ] || [ "${NETWORK}" = "dijkstra" ]; then
             keep_new_trace=true
         fi
 
@@ -622,6 +695,9 @@ PATCH_EOF
         log "WARN: CNTools getBalanceKoios patch skipped (splice/syntax check failed)"
     fi
     rm -f "${patch_file}"
+
+    apply_guild_envelope_shim
+
 }
 
 # ----- Configure pool information in Guild scripts -----
@@ -721,7 +797,9 @@ setup_network_configs() {
                  log "ApexFusion Prime Testnet (Vector chain)" ;;
         leios)   BASE_URL="https://book.play.dev.cardano.org/environments-pre/leios"
                  log "Ouroboros Leios — Musashi Dojo testnet (magic 164)" ;;
-        *)       err "Unknown network: ${NETWORK}. Supported: mainnet, preview, preprod, guild, afpm, afpt, leios"; exit 1 ;;
+        dijkstra) BASE_URL="https://book.play.dev.cardano.org/environments-pre/dijkstra"
+                 log "Dijkstra testnet — magic 6, node 11.2.0, HF-ready envelope config" ;;
+        *)       err "Unknown network: ${NETWORK}. Supported: mainnet, preview, preprod, guild, afpm, afpt, leios, dijkstra"; exit 1 ;;
     esac
 
     # Config file precedence: CLI override > hybrid-configs > network mismatch > existing > download
@@ -746,7 +824,9 @@ setup_network_configs() {
     elif [ -f "${CONFIG_DIR}/config.json" ]; then
         # Detect network mismatch: mainnet/afpm uses RequiresNoMagic, testnets use RequiresMagic
         local existing_magic
-        existing_magic=$(jq -r '.RequiresNetworkMagic // empty' "${CONFIG_DIR}/config.json" 2>/dev/null)
+        # Flat configs store RequiresNetworkMagic at top level; cardano-config
+        # envelopes nest it under Configuration.Protocol.
+        existing_magic=$(jq -r '.RequiresNetworkMagic // .Configuration.Protocol.RequiresNetworkMagic // empty' "${CONFIG_DIR}/config.json" 2>/dev/null)
         local expect_magic="RequiresMagic"
         [ "${NETWORK}" = "mainnet" ] && expect_magic="RequiresNoMagic"
         [ "${NETWORK}" = "afpm" ] && expect_magic="RequiresNoMagic"
@@ -775,12 +855,9 @@ setup_network_configs() {
     elif [ -f "${HYBRID_CONFIG_DIR}/${NETWORK}/topology.json" ]; then
         log "Using hybrid topology override for ${NETWORK}"
         cp "${HYBRID_CONFIG_DIR}/${NETWORK}/topology.json" "${CONFIG_DIR}/topology.json"
-    elif [ "${NETWORK}" = "leios" ]; then
-        # Leios: guild-deploy seeds a Cardano *mainnet* topology (backbone peers),
-        # which is wrong for Musashi Dojo. Always pull the Leios topology so the
-        # node bootstraps from leios-node.play.dev.cardano.org and picks up the
-        # peerSnapshotFile reference. (BP mode with CUSTOM_PEERS still overrides
-        # this below via add_custom_peers.)
+    elif [ "${NETWORK}" = "leios" ] || [ "${NETWORK}" = "dijkstra" ]; then
+        # Guild-deploy seeds a Cardano mainnet topology. These networks must
+        # bootstrap from their own book peer, and the topology names a peer snapshot.
         log "Downloading ${NETWORK} topology.json (force refresh over guild default)..."
         curl -sS -o "${CONFIG_DIR}/topology.json" "${BASE_URL}/topology.json"
     elif [ ! -f "${CONFIG_DIR}/topology.json" ]; then
@@ -791,7 +868,7 @@ setup_network_configs() {
     # Download genesis files for the requested network (always refresh to ensure correct network)
     # Leios (Musashi Dojo) introduces a 5th era genesis: dijkstra-genesis.json
     local genesis_files="byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json"
-    if [ "${NETWORK}" = "leios" ]; then
+    if [ "${NETWORK}" = "leios" ] || [ "${NETWORK}" = "dijkstra" ]; then
         genesis_files="${genesis_files} dijkstra-genesis.json"
     fi
     for genesis in ${genesis_files}; do
@@ -820,11 +897,11 @@ setup_network_configs() {
     # Leios (Musashi Dojo): topology.json references a peer snapshot file.
     # Fetch the file named by peerSnapshotFile (default peer-snapshot.json) so the
     # node doesn't fail on a missing reference.
-    if [ "${NETWORK}" = "leios" ] && [ -f "${CONFIG_DIR}/topology.json" ]; then
+    if { [ "${NETWORK}" = "leios" ] || [ "${NETWORK}" = "dijkstra" ]; } && [ -f "${CONFIG_DIR}/topology.json" ]; then
         local snap_file
         snap_file=$(jq -r '.peerSnapshotFile // "peer-snapshot.json"' "${CONFIG_DIR}/topology.json" 2>/dev/null)
         if [ -n "${snap_file}" ] && [ "${snap_file}" != "null" ]; then
-            log "Downloading ${snap_file} for leios..."
+            log "Downloading ${snap_file} for ${NETWORK}..."
             curl -sS -o "${CONFIG_DIR}/${snap_file}" "${BASE_URL}/${snap_file}" 2>/dev/null || \
                 warn "Could not download ${snap_file} (may not exist for this network)"
         fi
@@ -875,30 +952,6 @@ add_custom_peers() {
         }')
         log "BP topology: set ${num_peers} exclusive relay peers (locked-down, no public roots)"
         echo "${topology_json}" > "${topology}"
-    elif { [ "${NETWORK}" = "afpm" ] || [ "${NETWORK}" = "afpt" ]; } && \
-         jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
-        # ApexFusion relay mode: custom peers are our own BPs/relays, so they must be
-        # trustable (untrusted local roots can be dropped in favour of ledger peers).
-        # Strip these peers from existing groups first so restarts stay idempotent
-        # and legacy "valency"/untrusted groups get replaced.
-        jq --argjson peers "${peers_json}" '
-            ($peers | map("\(.address):\(.port)")) as $keys
-            | .localRoots |= map(
-                .accessPoints |= map(select(("\(.address):\(.port)" | IN($keys[])) | not))
-                | (.accessPoints | length) as $n
-                | if .hotValency then .hotValency = ([.hotValency, $n] | min) else . end
-                | if .warmValency then .warmValency = ([.warmValency, $n] | min) else . end
-                | if .valency then .valency = ([.valency, $n] | min) else . end)
-            | .localRoots |= map(select((.accessPoints | length) > 0))
-            | .localRoots += [{
-                "accessPoints": $peers,
-                "advertise": false,
-                "trustable": true,
-                "hotValency": ($peers | length),
-                "warmValency": ($peers | length)
-              }]' \
-            "${topology}" > "${topology}.tmp" && mv "${topology}.tmp" "${topology}"
-        log "Relay topology: set ${#PEER_LIST[@]} trustable custom peers"
     elif jq -e '.localRoots' "${topology}" > /dev/null 2>&1; then
         # Relay mode: append custom peers to existing topology
         # First check if custom peers are already present (avoid duplicates on restart)
@@ -1262,6 +1315,7 @@ get_network_flag() {
         guild)   echo "--testnet-magic 141" ;;
         afpt)    echo "--testnet-magic 3311" ;;
         leios)   echo "--testnet-magic 164" ;;
+        dijkstra) echo "--testnet-magic 6" ;;
         *)       echo "--mainnet" ;;
     esac
 }

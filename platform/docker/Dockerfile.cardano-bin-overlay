@@ -1,0 +1,23 @@
+# Overlay official IntersectMBO cardano-node/cli binaries onto a Hybrid-Node
+# Cardano image. Keeps Guild tooling + entrypoint; swaps the node/cli (and
+# optionally a newer entrypoint from the build context).
+#
+# Example (Dijkstra 11.2.0):
+#   tar xf cardano-node-11.2.0-linux-amd64.tar.gz
+#   mkdir -p bin && cp bin/cardano-node bin/cardano-cli ./bin/   # from tarball
+#   docker build -f platform/docker/Dockerfile.cardano-bin-overlay \
+#     --build-arg BASE_IMAGE=ghcr.io/gvolcy/hybrid-node:cardano-11.1.3-dijkstra \
+#     -t ghcr.io/gvolcy/hybrid-node:cardano-11.2.0-dijkstra .
+
+ARG BASE_IMAGE=ghcr.io/gvolcy/hybrid-node:cardano-11.1.3-dijkstra
+FROM ${BASE_IMAGE}
+
+USER root
+COPY bin/cardano-node /usr/local/bin/cardano-node
+COPY bin/cardano-cli  /usr/local/bin/cardano-cli
+COPY platform/bin/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/cardano-node /usr/local/bin/cardano-cli /usr/local/bin/entrypoint.sh \
+ && cardano-node version \
+ && cardano-cli version
+
+USER 1000
