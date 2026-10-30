@@ -29,9 +29,10 @@ METRICS=$(run_cmd curl -sf "http://localhost:${PROM_PORT}/metrics" 2>/dev/null) 
     exit 1
 }
 
-KES_CURRENT=$(echo "$METRICS" | grep 'cardano_node_metrics_currentKESPeriod_int' | awk '{print $2}' | head -1)
-KES_REMAINING=$(echo "$METRICS" | grep 'cardano_node_metrics_remainingKESPeriods_int' | awk '{print $2}' | head -1)
-KES_EXPIRY=$(echo "$METRICS" | grep 'cardano_node_metrics_operationalCertificateExpiryKESPeriod_int' | awk '{print $2}' | head -1)
+metric() { printf '%s\n' "$METRICS" | awk -v k="$1" '$1==k {print $2; exit}'; }
+KES_CURRENT=$(metric cardano_node_metrics_currentKESPeriod_int)
+KES_REMAINING=$(metric cardano_node_metrics_remainingKESPeriods_int)
+KES_EXPIRY=$(metric cardano_node_metrics_operationalCertificateExpiryKESPeriod_int)
 
 KES_CURRENT="${KES_CURRENT:-unknown}"
 KES_REMAINING="${KES_REMAINING:-unknown}"
