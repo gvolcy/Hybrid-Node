@@ -17,9 +17,8 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 │  │             │  │             │  │             │  │             │  │
 │  │ ApexFusion  │  │ ApexFusion  │  │ ApexFusion  │  │ AI Sandbox  │  │
 │  │ BP (afpm)   │  │ Relay       │  │ Relay       │  │ Ollama      │  │
-│  │             │  │ Leios       │  │ Leios       │  │ Leios       │  │
-│  │ VOLCY Pool  │  │ leiosT1     │  │ leiosT2     │  │ leiosT3     │  │
-│  │ SILEM Pool  │  │ Discord     │  │             │  │ leiosT3     │  │
+│  │ Dijkstra BP │  │ Leios+Dijk  │  │ Leios+Dijk  │  │ Leios+Dijk  │  │
+│  │ VOLCY/SILEM │  │ :3010/:3011 │  │ :3010/:3011 │  │ :3010/:3011 │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │
 │         │                │                │                │          │
 │         └────────────────┴────────────────┴────────────────┘          │
@@ -41,11 +40,11 @@ Hybrid-Node runs across a distributed fleet of dedicated hosts, each with a spec
 
 | Host | Role | Networks | Notes |
 |------|------|----------|-------|
-| **main1** | Block Producers | Cardano mainnet, ApexFusion afpm | VOLCY + SILEM pools. Locked down — no public ports. |
+| **main1** | Block Producers | Cardano mainnet, ApexFusion afpm, **Dijkstra BPs** | VOLCY + SILEM (mainnet + Dijkstra). Locked down — no public ports. |
 | **main2** | Testnet / Dev | Preview, Preprod, Guild, AFPT, Midnight, **Leios BPs** | Non-production workloads. **leios-volcy** + **leios-silem** (Hybrid-Node image, private topology). |
-| **main3** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT1** | Primary relay (:3010). Legacy bot K3s scaled to 0 (bots on main7). |
-| **main4** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT2** | Secondary Leios relay (:3010) for BP peering redundancy. |
-| **main5** | Relays | Cardano mainnet, Leios (**leiosT3**) | Tertiary Leios relay (:3010). Local Ollama models removed (2026-07-30). |
+| **main3** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT1**, **Dijkstra relay** | Leios :3010 + Dijkstra :3011. |
+| **main4** | Relays | Cardano mainnet, ApexFusion afpm, **Leios leiosT2**, **Dijkstra relay** | Leios :3010 + Dijkstra :3011. |
+| **main5** | Relays | Cardano mainnet, Leios (**leiosT3**), **Dijkstra relay** | Leios :3010 + Dijkstra :3011. |
 | **main6** | NAS / Storage | — | Backup target. DB snapshots, AI memory, cold key storage (offline). |
 | **main7** | GX10 / AI | — | DGX Spark GB10. Ollama (`:11434`) + K3s Discord bots (Jen/Ben/Mario/Marques/Becky/Ara). User `midnigh-sonic`. |
 | **main8** | MacBook | — | Laptop (`gvolcy`). Wazuh agent 010. Tailscale `100.92.119.18`. |
@@ -86,18 +85,24 @@ Hybrid-Node
 │   └── testnet (afpt) → main2
 │
 ├── Leios (Ouroboros Leios — Musashi Dojo)
-│   └── musashi (leios, magic 164) → Option B: ghcr.io/gvolcy/hybrid-node:leios-11.1.0
+│   └── musashi (leios, magic 164) → ghcr.io/gvolcy/hybrid-node:leios-rc-2026w43
 │       Relays: leiosT1 (main3 :3010), leiosT2 (main4 :3010), leiosT3 (main5 :3010)
 │       BPs: leios-volcy (main2 :6000), leios-silem (main2 :6001)
-│       Fleet node pin: git 3cc6340a (prototype-2026w27, chain-db compatible); HEAD CLI for Dijkstra txs
-│       On-chain: stake + pool registered; forging pending upstream BLS (#776)
+│       Fleet pin: chains/leios/versions.env (rc-2026w43 / 11.2.0.164)
+│
+├── Dijkstra (public testnet, magic 6)
+│   └── dijkstra → ghcr.io/gvolcy/hybrid-node:cardano-11.2.0-dijkstra
+│       BPs: dijkstra-bp / dijkstra-silem (main1 :6000 / :6001)
+│       Relays: main3 / main4 / main5 (:3011)
+│       Book envelope config (MinNodeVersion 11.2.0, ExperimentalHardForksEnabled)
+│       Pin: chains/dijkstra/versions.env — not the mainnet Cardano 11.1.3 pin
 │
 ├── Midnight
 │   └── preview        → main2 (K3s stack)
 │
 └── Shared Platform
-    ├── Docker images   → Dockerfile.cardano, Dockerfile.apexfusion, Dockerfile.leios
-    ├── Entrypoint      → platform/bin/entrypoint.sh (1100+ lines)
+    ├── Docker images   → Dockerfile.cardano (+ bin-overlay), Dockerfile.apexfusion, Dockerfile.leios
+    ├── Entrypoint      → platform/bin/entrypoint.sh (NETWORK=dijkstra/leios/…)
     ├── Health check    → platform/bin/healthcheck.sh
     ├── Helm chart      → charts/hybrid-node/
     ├── Monitoring      → monitoring/ (Prometheus, Grafana, alerts)
@@ -115,10 +120,11 @@ Each chain has its own Dockerfile and version pins:
 
 | Chain | Dockerfile | Node | CLI | Guild Source |
 |-------|-----------|------|-----|-------------|
-| Cardano | `Dockerfile.cardano` | 11.0.1 | 11.0.0.0 | cardano-community/guild-operators (master) |
+| Cardano | `Dockerfile.cardano` | 11.1.3 | 11.2.3.0 | cardano-community/guild-operators (master) |
+| Dijkstra | `Dockerfile.cardano` + `Dockerfile.cardano-bin-overlay` | 11.2.0 | 11.6.0.0 | same Guild tooling as Cardano image |
 | ApexFusion | `Dockerfile.apexfusion` | 10.1.4 | 9.4.1.0 | Scitz0/guild-operators-apex (main) |
-| Leios | `Dockerfile.leios` | `leios-prototype` branch (reports 11.0.1-leios-prototype) | built from source (same branch) | cardano-community/guild-operators (master) |
-| Midnight | Pre-built upstream | — | — | midnightntwrk/midnight-node |
+| Leios | `Dockerfile.leios` / `leios-bin-overlay` | `rc-2026w43` (`11.2.0.164`) | leios-prototype CLI | cardano-community/guild-operators (`leios` branch) |
+| Midnight | Pre-built upstream | 1.0.400 | — | midnightntwrk/midnight-node |
 
 > Leios builds **both** `cardano-node` and `cardano-cli` from the `leios-prototype`
 > branch (the branch's `cabal.project` pins patched `ouroboros-consensus` /
@@ -235,6 +241,30 @@ not mounted as files:
 
 ---
 
+## Dijkstra Stack
+
+Public Cardano testnet (magic **6**) preparing the Dijkstra-era hard fork. Same shared
+entrypoint as Cardano (`NETWORK=dijkstra`); fleet image is a thin overlay of official
+IntersectMBO **11.2.0** binaries:
+
+`ghcr.io/gvolcy/hybrid-node:cardano-11.2.0-dijkstra`
+
+Book configs are cardano-config **envelopes** (`MinNodeVersion=11.2.0`,
+`ExperimentalHardForksEnabled=true`). Entrypoint adds Guild top-level aliases so
+gLiveView works, and switches BP `ConsensusMode` to PraosMode. See
+[`chains/dijkstra/README.md`](../chains/dijkstra/README.md).
+
+| Node | Role | Host | Port |
+|------|------|------|------|
+| dijkstra-bp | BP | main1 | 6000 |
+| dijkstra-silem | BP | main1 | 6001 |
+| dijkstra-relay | relay | main3 / main4 / main5 | 3011 |
+
+Ops: relays first; HUP `cardano-node` after 100% sync to forge; first 11.2.0 boot may
+replay ledger snapshots (`InvalidSnapshot` / ShelleyLedgerState size mismatch) — expected.
+
+---
+
 ## Leios / Musashi Dojo Stack
 
 Leios (Ouroboros Leios) is the [Musashi Dojo](https://www.musashi.network/) public
@@ -244,7 +274,7 @@ platform as Cardano and ApexFusion, but on a **prototype** build with extra laye
 
 ### Fleet topology (deployed)
 
-All live Leios nodes run **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` with
+All live Leios nodes run **Option B** — `ghcr.io/gvolcy/hybrid-node:leios-rc-2026w43` with
 `NETWORK=leios` and the shared entrypoint. Relays bootstrap from IOG's Musashi peer;
 BPs use a **private topology** (Tailscale only, no public or ledger peers).
 
