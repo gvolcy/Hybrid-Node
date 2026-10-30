@@ -494,9 +494,14 @@ spec:
                     echo "ERROR: No running BP pod found!"
                     exit 1
                   fi
-                  REMAINING=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_remainingKESPeriods_int' | awk '{print $2}')
-                  CURRENT=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_currentKESPeriod_int' | awk '{print $2}')
-                  EXPIRY=$(kubectl exec -n $NS $POD -- curl -s localhost:${PROM_PORT}/metrics 2>/dev/null | grep 'cardano_node_metrics_operationalCertificateExpiryKESPeriod_int' | awk '{print $2}')
+                  METRICS=$(kubectl exec -n $NS $POD -- curl -sf localhost:${PROM_PORT}/metrics 2>/dev/null || true)
+                  metric() { printf '%s\n' "$METRICS" | awk -v k="$1" '$1==k {print $2; exit}'; }
+                  REMAINING=$(metric cardano_node_metrics_remainingKESPeriods_int)
+                  CURRENT=$(metric cardano_node_metrics_currentKESPeriod_int)
+                  EXPIRY=$(metric cardano_node_metrics_operationalCertificateExpiryKESPeriod_int)
+                  case $REMAINING in
+                    ''|*[!0-9]*) echo "CRITICAL: Could not read KES metrics (got '${REMAINING:-empty}')"; exit 1 ;;
+                  esac
                   DAYS_LEFT=$(( REMAINING * 129600 / 86400 ))
                   echo "=== KES Status: $DEPLOY ==="
                   echo "Current KES Period: $CURRENT"
@@ -504,10 +509,6 @@ spec:
                   echo "Remaining Periods:  $REMAINING"
                   echo "Approx Days Left:   $DAYS_LEFT"
                   echo "=========================="
-                  if [ -z "$REMAINING" ]; then
-                    echo "CRITICAL: Could not read KES metrics!"
-                    exit 1
-                  fi
                   if [ "$REMAINING" -le "$KES_WARN_THRESHOLD" ]; then
                     echo "WARNING: KES key expires in $REMAINING periods (~${DAYS_LEFT} days)! ROTATE NOW!"
                     exit 1
