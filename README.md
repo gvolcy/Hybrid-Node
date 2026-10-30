@@ -1,6 +1,6 @@
 # 🔀 Hybrid-Node
 
-**Multi-chain node deployment framework for Cardano, ApexFusion, Midnight, and Leios using Docker,
+**Multi-chain node deployment framework for Cardano, ApexFusion, Midnight, Leios, and Dijkstra using Docker,
 Helm, and K3s.**
 
 [![Lint](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml/badge.svg)](https://github.com/gvolcy/Hybrid-Node/actions/workflows/lint.yml)
@@ -10,7 +10,7 @@ Helm, and K3s.**
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Hybrid-Node is an operator-focused deployment framework for running Cardano, ApexFusion,
-Midnight, and Leios blockchain nodes in production. Built with Docker, Helm, and K3s, it provides
+Midnight, Leios, and Dijkstra blockchain nodes in production. Built with Docker, Helm, and K3s, it provides
 modular, production-friendly deployment workflows for relay and block producer environments.
 
 ## Why This Exists
@@ -24,8 +24,9 @@ graceful shutdown, and multi-pool key management out of the box. One image per c
 Deploy in seconds.
 
 > 🟢 **Production-validated** — Running across 17+ nodes: Cardano mainnet (VOLCY & SILEM stake
-> pools), ApexFusion Vector (AFPM/AFPT), Midnight Preview, and **Leios / Musashi Dojo**
-> (leiosT1 + leiosT2 + leiosT3 relays, leios-volcy + leios-silem BPs on main2/main3/main4/main5).
+> pools), ApexFusion Vector (AFPM/AFPT), Midnight Preview, **Leios / Musashi Dojo**
+> (leiosT1–T3 relays + leios-volcy/silem BPs), and **Dijkstra** testnet (magic 6 — dijkstra-bp /
+> dijkstra-silem on main1, relays on main3/main4/main5 :3011, node 11.2.0 HF-ready).
 
 ---
 
@@ -36,10 +37,11 @@ version pins, and image tags — there is no ambiguous `latest` tag.
 
 | Chain | Dockerfile | Node Version | Image Tag |
 |-------|-----------|--------------|-----------|
-| **Cardano** | `platform/docker/Dockerfile.cardano` | 11.0.1 | `ghcr.io/gvolcy/hybrid-node:cardano-11.0.1` |
+| **Cardano** | `platform/docker/Dockerfile.cardano` | 11.1.3 | `ghcr.io/gvolcy/hybrid-node:cardano-11.1.3` |
+| **Dijkstra** | `Dockerfile.cardano` + `Dockerfile.cardano-bin-overlay` | 11.2.0 | `ghcr.io/gvolcy/hybrid-node:cardano-11.2.0-dijkstra` |
 | **ApexFusion** | `platform/docker/Dockerfile.apexfusion` | 10.1.4 | `ghcr.io/gvolcy/hybrid-node:apexfusion-10.1.4` |
-| **Midnight** | Pre-built upstream image | 1.0.0 | `midnightntwrk/midnight-node:1.0.0` |
-| **Leios** | `platform/docker/Dockerfile.leios` *(or IOG prebuilt)* | `leios-prototype` | `ghcr.io/gvolcy/hybrid-node:leios-11.1.0` *(or `ghcr.io/input-output-hk/ouroboros-leios/cardano-node-testnet:latest`)* |
+| **Midnight** | Pre-built upstream image | 1.0.400 | `midnightntwrk/midnight-node:1.0.400` |
+| **Leios** | `Dockerfile.leios` / `Dockerfile.leios-bin-overlay` | `rc-2026w43` (`11.2.0.164`) | `ghcr.io/gvolcy/hybrid-node:leios-rc-2026w43` |
 
 Version pins for each chain live in `chains/<chain>/versions.env`:
 
@@ -86,7 +88,7 @@ GUILD_DEPLOY_BRANCH=main
 
 | Network | `NETWORK=` | Magic | Status |
 |---------|------------|-------|--------|
-| Musashi Dojo testnet | `leios` | 164 | ✅ Fleet deployed (Option B Hybrid-Node image) |
+| Musashi Dojo testnet | `leios` | 164 | ✅ Fleet deployed (`leios-rc-2026w43`) |
 
 | Node | Role | Host | Port |
 |------|------|------|------|
@@ -96,6 +98,24 @@ GUILD_DEPLOY_BRANCH=main
 | leios-volcy | BP | main2 | 6000 |
 | leios-silem | BP | main2 | 6001 |
 
+### Dijkstra
+
+Public Cardano testnet for the Dijkstra-era hard fork. Uses the Cardano image lineage with an
+official **11.2.0** binary overlay and the book **envelope** config (`ExperimentalHardForksEnabled`).
+Mainnet Cardano stays on **11.1.3** — do not conflate the two pins.
+
+| Network | `NETWORK=` | Magic | Status |
+|---------|------------|-------|--------|
+| Dijkstra testnet | `dijkstra` | 6 | ✅ Fleet deployed (HF-ready) |
+
+| Node | Role | Host | Port |
+|------|------|------|------|
+| dijkstra-bp | BP | main1 | 6000 |
+| dijkstra-silem | BP | main1 | 6001 |
+| dijkstra-relay | relay | main3 / main4 / main5 | 3011 |
+
+> 📖 Details: [chains/dijkstra/README.md](chains/dijkstra/README.md) · pin in [`versions.env`](chains/dijkstra/versions.env)
+
 ### Midnight
 
 | Network | Image | Status |
@@ -104,7 +124,7 @@ GUILD_DEPLOY_BRANCH=main
 
 > ⚠️ Midnight uses its own Substrate-based node image — it does **not** use the shared Hybrid-Node Docker image.
 
-> 📖 Chain-specific docs: [Cardano](chains/cardano/README.md) · [ApexFusion](chains/apexfusion/README.md) · [Midnight](chains/midnight/README.md) · [Leios](chains/leios/README.md)
+> 📖 Chain-specific docs: [Cardano](chains/cardano/README.md) · [Dijkstra](chains/dijkstra/README.md) · [ApexFusion](chains/apexfusion/README.md) · [Midnight](chains/midnight/README.md) · [Leios](chains/leios/README.md)
 
 ---
 
@@ -199,18 +219,24 @@ Hybrid-Node/
 ├── platform/                       # Shared infrastructure
 │   ├── docker/
 │   │   ├── Dockerfile.cardano      #   Cardano multi-stage build
+│   │   ├── Dockerfile.cardano-bin-overlay  # Official binary overlay (e.g. Dijkstra 11.2.0)
 │   │   ├── Dockerfile.apexfusion   #   ApexFusion multi-stage build
-│   │   └── Dockerfile.leios      #   Leios / Musashi prototype build
+│   │   ├── Dockerfile.leios        #   Leios / Musashi prototype build
+│   │   └── Dockerfile.leios-bin-overlay    # IOG weekly binary overlay
 │   └── bin/
-│       ├── entrypoint.sh           #   Unified entrypoint (1000+ lines)
+│       ├── entrypoint.sh           #   Unified entrypoint (NETWORK=dijkstra/leios/…)
 │       └── healthcheck.sh          #   Container health check
 │
 ├── chains/                         # Chain-specific modules
-│   ├── cardano/                    #   ← Cardano chain
+│   ├── cardano/                    #   ← Cardano chain (mainnet pin 11.1.3)
 │   │   ├── README.md
 │   │   ├── versions.env            #     Pinned versions (node, cli, guild)
 │   │   ├── configs/                #     mainnet, preprod, preview, guild
 │   │   └── k3s/                    #     bp.yaml, relay.yaml
+│   │
+│   ├── dijkstra/                   #   ← Dijkstra testnet (magic 6, node 11.2.0 HF-ready)
+│   │   ├── README.md
+│   │   └── versions.env            #     Overlay image pin + book config URL
 │   │
 │   ├── apexfusion/                 #   ← ApexFusion chain
 │   │   ├── README.md
@@ -227,7 +253,7 @@ Hybrid-Node/
 │   │
 │   └── leios/                      #   ← Leios chain (Ouroboros Leios / Musashi Dojo)
 │       ├── README.md
-│       ├── versions.env            #     Prototype node pins + network params
+│       ├── versions.env            #     Weekly pin (e.g. rc-2026w43)
 │       ├── configs/                #     leios (magic 164)
 │       └── k3s/                    #     leiost1.yaml, leiost2.yaml, leiost3.yaml,
 │                                   #     relay.yaml, main2/leios-volcy.yaml,
