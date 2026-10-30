@@ -5,14 +5,14 @@ Template scripts for Mithril signer and DMQ node deployment on Cardano nodes.
 ## Scripts
 
 ### `autostart-signer.sh`
-Basic Mithril signer autostart script (no DMQ). Used for nodes that only need standard Mithril signing (e.g., preview-silem).
+Basic Mithril signer autostart script (no DMQ). Used for nodes that only need standard Mithril signing.
 
-- Downloads stable Mithril signer binary (v2630.1-hotfix / 1.1.9) if not present
+- Downloads stable Mithril signer binary (v2642.0 / 1.2.5) if not present
 - Manages signer process lifecycle with PID file tracking
 - Requires `mithril.env` in the same directory for configuration
 
 ### `autostart-signer-dmq.sh`
-Mithril signer autostart with DMQ (Decentralized Message Queue) support. Used for nodes that participate in DMQ (e.g., preview-volcy).
+Mithril signer autostart with DMQ (Decentralized Message Queue) support.
 
 - Same signer management as `autostart-signer.sh`
 - Additionally starts the DMQ node via `dmq-setup.sh`
@@ -20,12 +20,12 @@ Mithril signer autostart with DMQ (Decentralized Message Queue) support. Used fo
 - Requires `DMQ_NODE_SOCKET_PATH` set in `mithril.env`
 
 ### `dmq-setup.sh`
-DMQ node v0.4.2.0 setup and autostart script.
+DMQ node v0.7.2.2 setup and autostart script.
 
 - Downloads DMQ node binary from IntersectMBO/dmq-node releases
 - Generates trace-dispatcher config and topology automatically
 - Preview network defaults: cardano-magic=2, dmq-magic=2147483650
-- Peer: 34.76.22.193:6161
+- Peer BP topology at the relay DMQ listen port (e.g. 192.168.2.138:6161)
 
 ## Usage
 
@@ -38,5 +38,6 @@ DMQ node v0.4.2.0 setup and autostart script.
 
 | Component       | Version  | Tag/Commit |
 |----------------|----------|------------|
-| Mithril Signer | 2630.1-hotfix | 3f6cb73 (1.1.9) |
-| DMQ Node       | 0.6.0.0  | 12a8428    |
+| Mithril Signer | 2642.0   | e85df3d (1.2.5) |
+| Mithril Relay  | 2642.0   | e85df3d (0.2.10) |
+| DMQ Node       | 0.7.2.2  | — |

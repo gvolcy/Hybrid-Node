@@ -73,7 +73,14 @@ topologyOverride: |
 
 **Block producer** — connect **only** to your own relays, never the public
 network. Set `useLedgerAfterSlot` to `-1` so the BP never fetches public peers
-from the ledger:
+from the ledger. Prefer **one `localRoots` group per relay** with
+`hotValency: 1` so every relay stays hot even if another flaps. Set
+`peerSharing: false`.
+
+Same-LAN relays should use the **LAN IP and the real listen port** (for
+example `192.168.2.135:6004`), not a public DNS name that NATs to a different
+port. That cuts RTT and avoids DNS/router outages on the local hop. Remote-site
+relays keep their public DNS names.
 
 ```yaml
 topologyOverride: |
@@ -81,18 +88,39 @@ topologyOverride: |
     "localRoots": [
       {
         "accessPoints": [
-          { "address": "relay1.example.com", "port": 6000 },
-          { "address": "relay2.example.com", "port": 6000 }
+          { "address": "192.168.2.10", "port": 6004, "name": "relay-local" }
         ],
         "advertise": false,
         "trustable": true,
-        "valency": 2
+        "hotValency": 1
+      },
+      {
+        "accessPoints": [
+          { "address": "192.168.2.11", "port": 6004, "name": "relay-lan" }
+        ],
+        "advertise": false,
+        "trustable": true,
+        "hotValency": 1
+      },
+      {
+        "accessPoints": [
+          { "address": "relay-remote.example.com", "port": 3001, "name": "relay-remote" }
+        ],
+        "advertise": false,
+        "trustable": true,
+        "hotValency": 1
       }
     ],
     "publicRoots": [],
-    "useLedgerAfterSlot": -1
+    "useLedgerAfterSlot": -1,
+    "peerSharing": false,
+    "bootstrapPeers": []
   }
 ```
+
+After editing a mounted `topology.json`, reload with `SIGHUP` to
+`cardano-node` in a leader-slot gap (no process restart). A Helm/ConfigMap
+rollout restarts the pod and should wait for a safe gap.
 
 > ⚠️ **BP topology rule:** a block producer must peer *only* with your own relays.
 > Never list public peers and never expose the BP port publicly (use
@@ -102,12 +130,13 @@ topologyOverride: |
 
 | Field | Meaning |
 |-------|---------|
-| `localRoots[].accessPoints` | Peers you manage; the node keeps `valency` hot connections |
+| `localRoots[].accessPoints` | Peers you manage; the node keeps `hotValency` hot connections |
 | `advertise` | `true` to gossip this peer to others (usually `false` for private relays/BPs) |
 | `trustable` | Trust this group as a bootstrap source |
-| `valency` | Number of hot connections to maintain in the group |
+| `hotValency` / `valency` | Number of hot connections to maintain in the group |
 | `publicRoots` | Well-known bootstrap relays; `[]` for a BP |
 | `useLedgerAfterSlot` | Slot after which to use ledger peers; `-1` disables (BP) |
+| `peerSharing` | Set `false` on BPs so they do not advertise or accept shared peers |
 
 ## Updating topology on a running node
 

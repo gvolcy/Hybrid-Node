@@ -4,6 +4,8 @@ metadata:
   name: {{ .Values.bp.name }}-topology
   namespace: {{ .Values.namespace }}
 data:
+  # Prefer one localRoots group per relay (hotValency: 1) so each peer stays hot.
+  # Same-LAN relays should use LAN IP + the real listen port (not public DNS/NAT).
   topology.json: |
     {
       "bootstrapPeers": [],
@@ -11,27 +13,41 @@ data:
         {
           "accessPoints": [
             {
-              "address": "preview2.example.com",
-              "port": 6005,
-              "description": "preview-relay-1"
-            },
-            {
-              "address": "preview1.example.com",
+              "address": "192.168.2.138",
               "port": 6004,
-              "description": "preview-relay-2"
-            },
-            {
-              "address": "preview3.example.com",
-              "port": 3001,
-              "description": "preview-relay-3"
+              "name": "preview1-relay-main2-lan"
             }
           ],
           "advertise": false,
           "trustable": true,
-          "hotValency": 3,
-          "warmValency": 3
+          "hotValency": 1
+        },
+        {
+          "accessPoints": [
+            {
+              "address": "192.168.2.135",
+              "port": 6004,
+              "name": "preview2-relay-main3-lan"
+            }
+          ],
+          "advertise": false,
+          "trustable": true,
+          "hotValency": 1
+        },
+        {
+          "accessPoints": [
+            {
+              "address": "preview3.example.com",
+              "port": 3001,
+              "name": "preview3-relay-remote"
+            }
+          ],
+          "advertise": false,
+          "trustable": true,
+          "hotValency": 1
         }
       ],
       "publicRoots": [],
-      "useLedgerAfterSlot": -1
+      "useLedgerAfterSlot": -1,
+      "peerSharing": false
     }
