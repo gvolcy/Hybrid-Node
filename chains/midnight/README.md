@@ -151,9 +151,9 @@ kubectl exec -n midnight deployment/midnight-node -c key-inserter -- \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CFG_PRESET` | — | `preview` |
-| `NODE_KEY` | — | libp2p node private key (hex) |
-| `BOOTNODES` | — | Space-separated multiaddr boot nodes |
-| `APPEND_ARGS` | — | Additional CLI flags (e.g., `--validator`, `--name`) |
+| `NODE_KEY` | — | Stored in the secret for reference only. The binary does **not** use this env for identity. |
+| `BOOTNODES` | — | Space-separated multiaddr boot nodes (also reference-only; pass `--bootnodes` in `APPEND_ARGS`) |
+| `APPEND_ARGS` | — | CLI flags. Must include `--bootnodes`, `--sync warp`, and `--node-key <64-hex>` for a stable peer id. |
 | `DB_SYNC_POSTGRES_CONNECTION_STRING` | — | PostgreSQL connection string |
 | `CARDANO_SECURITY_PARAMETER` | `432` | Cardano `k` parameter |
 | `CARDANO_ACTIVE_SLOTS_COEFF` | `0.05` | Cardano active slots coefficient |
@@ -166,8 +166,9 @@ kubectl exec -n midnight deployment/midnight-node -c key-inserter -- \
 | `AURA_PUB_KEY` | AURA consensus public key (hex, `0x` prefix) |
 | `GRANDPA_PUB_KEY` | GRANDPA finality public key (hex, `0x` prefix) |
 | `SIDECHAIN_PUB_KEY` | Partner Chains sidechain public key (hex, `0x` prefix) |
+| `AURA_SEED` / `GRANDPA_SEED` / `SIDECHAIN_SEED` | Secret seeds for `author_insertKey` (keep in the Kubernetes secret, not the ConfigMap) |
 
-> ⚠️ Midnight validator keys are **inserted via RPC** after the node starts, not loaded from files. The key-inserter sidecar handles this automatically and re-checks hourly.
+> ⚠️ Midnight keys are **inserted via RPC** after the node starts. Pass seed + public key to `author_insertKey`. The sidechain key type is `crch` (ECDSA), not a copy of the AURA key. The key-inserter sidecar re-checks hourly.
 
 ---
 
@@ -177,19 +178,55 @@ kubectl exec -n midnight deployment/midnight-node -c key-inserter -- \
 
 - Setting `--validator` in `APPEND_ARGS` enables block production (Role: AUTHORITY).
 - Without `--validator`, the node runs as a full node (Role: FULL).
+- Preview currently has **0 registered stake-pool seats** (`numRegisteredCandidates: 0`).
+  Keep VOLCY/SILEM as full nodes until Mōhalu opens registered seats. Do not register
+  or enable `--validator` just to "test" the node.
 - Validator keys (AURA, GRANDPA, Sidechain) must be inserted via RPC.
+
+### Peer identity (`--node-key`)
+
+- The `NODE_KEY` environment variable does **not** set the libp2p peer id.
+- Put a 64-character hex key in `APPEND_ARGS` as `--node-key <hex>` (no `0x` prefix).
+- Keep the same value in the `midnight-secrets` `node-key` entry so backups and the
+  live flag stay aligned.
+- If public peers refuse block requests after a stall and the node sits on one height,
+  rotate `--node-key`. Wiping the chain alone does not clear a blacklisted peer id.
 
 ### Peer Discovery
 
 - Midnight uses **libp2p** for peer discovery (not Ouroboros P2P).
-- Boot nodes are configured via the `BOOTNODES` environment variable.
-- Nodes behind NAT may have limited inbound peer connections.
-- Port 30333 (P2P) should be exposed for optimal connectivity.
+- Pass bootnodes with `--bootnodes` in `APPEND_ARGS` (the `BOOTNODES` env is ignored by the binary).
+- Nodes behind NAT need the P2P NodePort forwarded and `--public-addr` set to the public multiaddr.
+- Keep RPC `9944` and metrics `9615` as ClusterIP.
 - Prefer `--sync warp` in `APPEND_ARGS` for faster catch-up after wipes/restarts.
-- Running two validators (e.g. separate namespaces on one cluster): add
+- Running two nodes (e.g. separate namespaces on one cluster): add
   `--reserved-nodes /dns/midnight-p2p.<peer-ns>.svc.cluster.local/tcp/30333/ws/p2p/<PEER_ID>`
   so the pair stays dialed after peer bans or restarts. Get `PEER_ID` via
   `system_localPeerId` RPC on the peer node.
+
+### Unclean shutdown / ledger corruption
+
+After a host crash or hard kill, the Midnight ledger DB can be left inconsistent.
+Symptoms:
+
+- Local tip stuck while public Preview advances
+- Sync rate `0.0 bps`
+- Logs: `root should be in the arena` / `not in storage arena`
+- Peers connect, then get banned for `Same block request multiple times`
+
+Recovery (keep identity and signing keys):
+
+1. Scale the `midnight-node` Deployment to `0`.
+2. On the PVC host path, delete only:
+   - `chain/chains/midnight_preview/paritydb`
+   - `chain/chains/midnight_preview/network`
+   - `chain/ledger_storage`
+3. Leave `chain/chains/midnight_preview/keystore/` untouched.
+4. Scale back to `1` with `--sync warp` still in `APPEND_ARGS`.
+5. Confirm tip vs `https://rpc.preview.midnight.network/`.
+
+Do **not** delete the keystore or change `--node-key` for this recovery unless peers
+are also blacklisting the identity.
 
 ### Postgres `/dev/shm`
 
@@ -200,7 +237,9 @@ kubectl exec -n midnight deployment/midnight-node -c key-inserter -- \
 
 ### Key Insertion
 
-- Validator keys are inserted via the Substrate `author_insertKey` RPC method.
+- Keys are inserted via the Substrate `author_insertKey` RPC method: type, seed, public.
+- Types: `aura` (sr25519), `gran` (ed25519), `crch` (ECDSA compressed, 33-byte / `0x02`/`0x03`).
+- Keep seeds in the Kubernetes secret. Do not put seed phrases in the key-inserter ConfigMap.
 - The key-inserter sidecar waits for RPC readiness, inserts all three key types, then monitors hourly.
 - Keys persist in the node's keystore at `/node/chain/chains/midnight_preview/keystore/`.
 
