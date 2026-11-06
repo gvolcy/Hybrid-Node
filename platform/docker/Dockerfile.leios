@@ -174,17 +174,16 @@ COPY --from=tools /usr/local/bin/txtop /usr/local/bin/
 COPY --from=tools /usr/local/bin/cncli /usr/local/bin/
 
 # ---- Install Guild Operators scripts ----
-# guild-operators now has a dedicated `leios` branch (strict superset of
-# `master`: 0 behind / 7 ahead as of 2026-07-14) with native Musashi (magic
-# 164) support: cntools.sh/env read the Dijkstra-era stake-pool-state field
-# Musashi Dijkstra-era Guild tooling comes from the `leios` branch (see
-# chains/leios/versions.env). Build-args override these defaults from CI/Make.
+# Musashi Guild tooling: pin a commit SHA (see chains/leios/versions.env).
+# The moving `leios` branch was deleted 2026-11-05; a branch name 404s and
+# curl without -f wrote "404: Not Found" into guild-deploy.sh (exit 127).
+# Build-args override these defaults from CI/Make.
 ARG G_ACCOUNT=cardano-community
 ARG GUILD_REPO=guild-operators
-ARG GUILD_DEPLOY_BRANCH=leios
+ARG GUILD_DEPLOY_BRANCH=07ce498d3b6c03698cbe2fa0b8da35f99a09d30b
 
 RUN apt-get update && \
-    curl -sS -o /tmp/guild-deploy.sh \
+    curl -fsS -o /tmp/guild-deploy.sh \
       https://raw.githubusercontent.com/${G_ACCOUNT}/${GUILD_REPO}/${GUILD_DEPLOY_BRANCH}/scripts/cnode-helper-scripts/guild-deploy.sh && \
     chmod +x /tmp/guild-deploy.sh && \
     SUDO=N SKIP_UPDATE=Y SKIP_DBSYNC_DOWNLOAD=Y \
