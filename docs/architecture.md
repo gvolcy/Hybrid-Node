@@ -124,7 +124,7 @@ Each chain has its own Dockerfile and version pins:
 | Dijkstra | `Dockerfile.cardano` + `Dockerfile.cardano-bin-overlay` | 11.2.0 | 11.6.0.0 | same Guild tooling as Cardano image |
 | ApexFusion | `Dockerfile.apexfusion` | 10.1.4 | 9.4.1.0 | Scitz0/guild-operators-apex (main) |
 | Leios | `Dockerfile.leios` / `leios-bin-overlay` | `rc-2026w43` (`11.2.0.164`) | leios-prototype CLI | cardano-community/guild-operators (`leios` branch) |
-| Midnight | Pre-built upstream | 1.0.400 | — | midnightntwrk/midnight-node |
+| Midnight | Pre-built upstream | 2.1.101 | — | midnightntwrk/midnight-node |
 
 > Leios builds **both** `cardano-node` and `cardano-cli` from the `leios-prototype`
 > branch (the branch's `cabal.project` pins patched `ouroboros-consensus` /

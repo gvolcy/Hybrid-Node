@@ -67,7 +67,7 @@ Unlike Cardano and ApexFusion, Midnight uses its **own binary** (`midnight-node`
 
 | Component | Version | Source |
 |-----------|---------|--------|
-| `midnight-node` | 1.0.400 | [midnightntwrk/midnight-node](https://hub.docker.com/r/midnightntwrk/midnight-node) |
+| `midnight-node` | 2.1.101 | [midnightntwrk/midnight-node](https://hub.docker.com/r/midnightntwrk/midnight-node) |
 | `cardano-node` (companion) | 11.0.1 | [intersectmbo/cardano-node](https://github.com/IntersectMBO/cardano-node) |
 | `cardano-db-sync` | 13.7.0.5 | [intersectmbo/cardano-db-sync](https://github.com/IntersectMBO/cardano-db-sync) |
 | `ogmios` | v6.14.0 | [cardanosolutions/ogmios](https://github.com/CardanoSolutions/ogmios) |
@@ -154,7 +154,7 @@ kubectl exec -n midnight deployment/midnight-node -c key-inserter -- \
 | `NODE_KEY` | — | Stored in the secret for reference only. The binary does **not** use this env for identity. |
 | `BOOTNODES` | — | Space-separated multiaddr boot nodes (also reference-only; pass `--bootnodes` in `APPEND_ARGS`) |
 | `APPEND_ARGS` | — | CLI flags. Must include `--bootnodes`, `--sync warp`, and `--node-key <64-hex>` for a stable peer id. |
-| `DB_SYNC_POSTGRES_CONNECTION_STRING` | — | PostgreSQL connection string |
+| `DB_SYNC_POSTGRES_CONNECTION_STRING` | — | PostgreSQL connection string (`sslmode=require` for 2.1.101+) |
 | `CARDANO_SECURITY_PARAMETER` | `432` | Cardano `k` parameter |
 | `CARDANO_ACTIVE_SLOTS_COEFF` | `0.05` | Cardano active slots coefficient |
 | `BLOCK_STABILITY_MARGIN` | `0` | Block stability margin |
@@ -204,6 +204,10 @@ kubectl exec -n midnight deployment/midnight-node -c key-inserter -- \
   so the pair stays dialed after peer bans or restarts. Get `PEER_ID` via
   `system_localPeerId` RPC on the peer node.
 
+### Preview relaunch (ledger 9 / 2.1.101)
+
+On 2026-11-07 Preview relaunched as a new chain on `midnight-node:2.1.101`. Old Preview DBs are invalid. Upgrade the image, wipe `paritydb` / `network` / `ledger_storage` (keep keystore), enable Postgres TLS, then warp-sync against `rpc.preview.midnight.network`.
+
 ### Unclean shutdown / ledger corruption
 
 After a host crash or hard kill, the Midnight ledger DB can be left inconsistent.
@@ -245,6 +249,7 @@ are also blacklisting the identity.
 
 ### Cardano Companion Node
 
+- Midnight 2.1.101+ requires TLS to the Cardano db-sync Postgres. Use `sslmode=require` (and `ssl_root_cert` if verifying). `ALLOW_NON_SSL` is ignored.
 - Midnight requires a fully synced Cardano Preview node.
 - DB-Sync must be running and synced for the partner chains bridge.
 - If Cardano falls behind, Midnight will log: `Unable to author block — No latest block on chain`.
