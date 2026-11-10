@@ -61,7 +61,8 @@ spec:
               {{- end }}
               value: {{ $args | quote }}
             - name: DB_SYNC_POSTGRES_CONNECTION_STRING
-              value: "postgresql://{{ .Values.postgres.user }}:{{ .Values.secrets.postgresPassword }}@postgres:5432/{{ .Values.postgres.db }}?sslmode=disable"
+              value: "postgresql://{{ .Values.postgres.user }}:{{ .Values.secrets.postgresPassword }}@postgres:5432/{{ .Values.postgres.db }}?sslmode=require"
+            # 2.1.101 requires TLS; ALLOW_NON_SSL is ignored by the binary.
             - name: ALLOW_NON_SSL
               value: {{ .Values.midnightNode.allowNonSsl | quote }}
             - name: CARDANO_SECURITY_PARAMETER

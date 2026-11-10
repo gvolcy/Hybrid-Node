@@ -101,7 +101,7 @@ spec:
       containers:
         # ── Midnight Node ────────────────────────────────────────────────
         - name: midnight-node
-          image: midnightntwrk/midnight-node:1.0.400
+          image: midnightntwrk/midnight-node:2.1.101
           env:
             - name: CFG_PRESET
               value: preview
@@ -130,9 +130,8 @@ spec:
             - name: APPEND_ARGS
               value: "--name midnight-validator --allow-private-ip --pool-limit 10 --prometheus-external --rpc-external --rpc-cors all --rpc-methods unsafe --sync warp --bootnodes /dns/bootnode-1.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWK66i7dtGVNSwDh9tTeqov1q6LSdWsRLJvTyzTCaywYgK /dns/bootnode-2.preview.midnight.network/tcp/30333/ws/p2p/12D3KooWHqFfXFwb7WW4jwR8pr4BEf562v5M6c8K3CXAJq4Wx6ym"
             - name: DB_SYNC_POSTGRES_CONNECTION_STRING
-              value: "postgresql://postgres:CHANGE-ME@postgres:5432/cexplorer?sslmode=disable"
-            - name: ALLOW_NON_SSL
-              value: "true"
+              value: "postgresql://postgres:CHANGE-ME@postgres:5432/cexplorer?sslmode=require"
+            # 2.1.101 requires TLS to db-sync Postgres; ALLOW_NON_SSL is ignored.
             - name: CARDANO_SECURITY_PARAMETER
               value: "432"
             - name: CARDANO_ACTIVE_SLOTS_COEFF
