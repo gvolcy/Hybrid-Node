@@ -290,10 +290,12 @@ jobs:
           EXPECTED_REV="${{ steps.dijkstra.outputs.node_git_rev }}"
           ASSET="cardano-node-${VER}-linux-amd64.tar.gz"
           URL="https://github.com/IntersectMBO/cardano-node/releases/download/${VER}/${ASSET}"
-          curl -fsSL -o /tmp/node.tar.gz "$URL"
-          mkdir -p bin
-          tar -xzf /tmp/node.tar.gz -C /tmp
-          cp /tmp/bin/cardano-node /tmp/bin/cardano-cli bin/
+          curl -fsSL -o node.tar.gz "$URL"
+          mkdir -p bin extract
+          # Extract into a workspace subdir (not /tmp): sticky-bit /tmp rejects
+          # tar's utime/chmod on '.' and fails the step under set -e.
+          tar -xzf node.tar.gz -C extract --no-same-owner
+          cp extract/bin/cardano-node extract/bin/cardano-cli bin/
           chmod 755 bin/cardano-node bin/cardano-cli
           GOT_REV="$(./bin/cardano-node version | awk '/git rev/{print $NF}')"
           echo "node reports: $(./bin/cardano-node version | tr '\n' ' ')"
