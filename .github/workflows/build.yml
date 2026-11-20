@@ -24,6 +24,7 @@ on:
           - all
           - cardano
           - apexfusion
+          - dijkstra
           - leios
           - tx-firehose
       node_version:
@@ -48,7 +49,8 @@ jobs:
     if: >-
       github.event_name != 'workflow_dispatch' ||
       (github.event.inputs.chain != 'leios' &&
-       github.event.inputs.chain != 'tx-firehose')
+       github.event.inputs.chain != 'tx-firehose' &&
+       github.event.inputs.chain != 'dijkstra')
     permissions:
       contents: read
       packages: write
@@ -227,6 +229,111 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ---------------------------------------------------------------------------
+  # Dijkstra: thin overlay of the official IntersectMBO linux-amd64 tarball onto
+  # the prior Hybrid-Node Dijkstra image (Guild tools + entrypoint retained).
+  # Pins live in chains/dijkstra/versions.env. Skipped on pull_request.
+  # ---------------------------------------------------------------------------
+  dijkstra:
+    name: Build dijkstra
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.chain == 'all' ||
+       github.event.inputs.chain == 'dijkstra')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load Dijkstra versions
+        id: dijkstra
+        run: |
+          set -a; . chains/dijkstra/versions.env; set +a
+          {
+            echo "node_version=${NODE_VERSION}"
+            echo "node_git_rev=${NODE_GIT_REV}"
+            echo "cli_version=${CLI_VERSION}"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "base_image=${REGISTRY}/${IMAGE_NAME}:${BASE_IMAGE_TAG}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build: dijkstra"
+            echo "| Parameter | Value |"
+            echo "|-----------|-------|"
+            echo "| Node | ${NODE_VERSION} (${NODE_GIT_REV}) |"
+            echo "| CLI | ${CLI_VERSION} |"
+            echo "| Base image | ${BASE_IMAGE_TAG} |"
+            echo "| Image tag | ${IMAGE_TAG} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download official node/cli binaries
+        run: |
+          set -euo pipefail
+          VER="${{ steps.dijkstra.outputs.node_version }}"
+          EXPECTED_REV="${{ steps.dijkstra.outputs.node_git_rev }}"
+          ASSET="cardano-node-${VER}-linux-amd64.tar.gz"
+          URL="https://github.com/IntersectMBO/cardano-node/releases/download/${VER}/${ASSET}"
+          curl -fsSL -o /tmp/node.tar.gz "$URL"
+          mkdir -p bin
+          tar -xzf /tmp/node.tar.gz -C /tmp
+          cp /tmp/bin/cardano-node /tmp/bin/cardano-cli bin/
+          chmod 755 bin/cardano-node bin/cardano-cli
+          GOT_REV="$(./bin/cardano-node version | awk '/git rev/{print $NF}')"
+          echo "node reports: $(./bin/cardano-node version | tr '\n' ' ')"
+          echo "cli reports:  $(./bin/cardano-cli version | tr '\n' ' ')"
+          if [[ "$GOT_REV" != "$EXPECTED_REV" ]]; then
+            echo "::error::git rev mismatch: expected ${EXPECTED_REV}, got ${GOT_REV}"
+            exit 1
+          fi
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.dijkstra.outputs.image_tag }}
+            type=raw,value=dijkstra,enable={{is_default_branch}}
+            type=sha,prefix=dijkstra-
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: platform/docker/Dockerfile.cardano-bin-overlay
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BASE_IMAGE=${{ steps.dijkstra.outputs.base_image }}
+          cache-from: type=gha,scope=dijkstra
+          cache-to: type=gha,mode=max,scope=dijkstra
+
+      - name: Summary
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Published Tags" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   # Leios is a PROTOTYPE built from cardano-node's `leios-prototype` branch
